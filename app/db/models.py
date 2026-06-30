@@ -1,0 +1,137 @@
+from __future__ import annotations
+import uuid
+from datetime import date, datetime
+from typing import Optional
+from pydantic import BaseModel
+
+
+class Hotel(BaseModel):
+    id: uuid.UUID
+    name: str
+    gender_scope: Optional[str] = None
+    priority_score: Optional[int] = None
+    is_visible: bool = True
+
+
+class University(BaseModel):
+    id: uuid.UUID
+    name: str
+    university_short_name: Optional[str] = None
+
+
+class UniversityAlias(BaseModel):
+    id: uuid.UUID
+    university_id: uuid.UUID
+    alias: str
+
+
+class Conversation(BaseModel):
+    id: uuid.UUID
+    chatwoot_conversation_id: int
+    flow_state: str
+    university_id: Optional[uuid.UUID] = None
+    gender: Optional[str] = None
+    contact_phone: Optional[str] = None
+    reprompt_count: int = 0
+    last_reprompt_sent_at: Optional[datetime] = None
+    last_updated_at: Optional[datetime] = None
+    last_message_at: Optional[datetime] = None
+    messages_since_last_run: int = 0
+    auto_run_count: int = 0
+    manual_run_count: int = 0
+    labels: list[str] = []
+    # Chatwoot custom-attribute columns
+    ilgili_otel: Optional[str] = None
+    tasinma_tarihi: Optional[date] = None
+    kayip_nedeni: Optional[str] = None
+    oda_tiipi: Optional[str] = None
+    butce: Optional[str] = None
+    ilgili_otel_set_at: Optional[datetime] = None
+    ilgili_otel_set_by: Optional[str] = None
+
+
+class Message(BaseModel):
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    chatwoot_message_id: int
+    content: Optional[str] = None
+    message_type: Optional[str] = None
+    sender_type: Optional[str] = None
+    sender_id: Optional[str] = None
+    sender_name: Optional[str] = None
+    is_private: bool = False
+    created_at: Optional[datetime] = None
+
+
+class CannedResponse(BaseModel):
+    id: uuid.UUID
+    short_code: str
+    content: str
+
+
+class ResponseSchema(BaseModel):
+    id: uuid.UUID
+    hotel_id: uuid.UUID
+    response_id: uuid.UUID
+    sending_order: int
+
+
+class RecEngineLog(BaseModel):
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    idempotency_key: uuid.UUID
+    status: str
+    hotel_rec: Optional[uuid.UUID] = None
+
+
+class ChatbotLog(BaseModel):
+    conversation_id: Optional[uuid.UUID] = None
+    operation_layer: Optional[str] = None
+    which_run: Optional[str] = None
+    from_state: Optional[str] = None
+    to_state: Optional[str] = None
+    log_level: str = "info"
+    is_success: Optional[bool] = None
+    status_code: Optional[str] = None
+    internal_class: Optional[str] = None
+    network_status: Optional[str] = None
+    database_status: Optional[str] = None
+    explanation: Optional[str] = None
+
+
+class HotelChatwootLabelMap(BaseModel):
+    hotel_id: uuid.UUID
+    chatwoot_list_value: str
+
+
+class TagAssignerRun(BaseModel):
+    run_id: uuid.UUID
+    conversation_id: uuid.UUID
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    trigger_type: Optional[str] = None
+    status: str
+    gemini_result: Optional[dict] = None
+    batch_job_name: Optional[str] = None
+    batch_webhook_id: Optional[str] = None
+
+
+class TagAssignerLog(BaseModel):
+    log_id: Optional[uuid.UUID] = None
+    run_id: Optional[uuid.UUID] = None
+    conversation_id: Optional[uuid.UUID] = None
+    request_type: Optional[str] = None
+    request_from: Optional[str] = None
+    request_to: Optional[str] = None
+    is_success: Optional[bool] = None
+    status_code: Optional[str] = None
+    fail_reason: Optional[str] = None
+
+
+class TagAssignerQueueItem(BaseModel):
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    enqueued_at: Optional[datetime] = None
+    status: str
+    run_id: Optional[uuid.UUID] = None
+    trigger_type: Optional[str] = None
