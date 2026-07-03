@@ -96,4 +96,9 @@ async def rec_engine_callback(
     chatwoot_id = conversation.chatwoot_conversation_id
     await _send_hotel_responses(body.conversation_id, chatwoot_id, hotel_id)
 
+    # Write university / gender / ilgili_otel immediately so they are visible
+    # in Chatwoot without waiting for the next TagAssigner run.
+    from app.tagassigner.attribute_resolver import write_attributes_at_flow_completion
+    await write_attributes_at_flow_completion(body.conversation_id, chatwoot_id)
+
     return JSONResponse(status_code=200, content={"status": "ok"})

@@ -3,7 +3,10 @@ Deterministic attribute writes (§6.9 of tagassigner-v1-spec.md).
 
 Writes university, ogrenci_cinsiyet, and ilgili_otel to Chatwoot.
 Gemini never decides these — the Router always computes them from DB columns.
-All three are net-new Chatwoot writes (build brief #2).
+
+Two public entry points:
+  - resolve_and_write_attributes()  — TagAssigner's caller; logs to tag_assigner_logs
+  - write_attributes_at_flow_completion()  — InfoGatherer's caller; no run_id
 """
 from __future__ import annotations
 import logging
@@ -26,12 +29,88 @@ async def resolve_and_write_attributes(
     newest_ilgili_otel_evidence_at: Optional[datetime],
 ) -> bool:
     """
-    Resolves and writes the three deterministic attributes to Chatwoot.
+    TagAssigner entry point. Resolves and writes attributes, then records
+    the result in tag_assigner_logs under the given run_id.
     Returns True if all writes succeeded (or nothing needed writing).
+    """
+    ok, chatwoot_result = await _resolve_and_write(
+        conversation_id,
+        chatwoot_conversation_id,
+        newest_ilgili_otel_evidence_at,
+        set_by="tagAssigner",
+    )
+
+    if chatwoot_result is not None:
+        await queries.write_tagassigner_log(TagAssignerLog(
+            run_id=run_id,
+            conversation_id=conversation_id,
+            request_type="api",
+            request_from="router",
+            request_to="chatwoot",
+            is_success=chatwoot_result.ok,
+            status_code=str(chatwoot_result.status_code),
+            fail_reason=chatwoot_result.error if not chatwoot_result.ok else None,
+        ))
+        if not chatwoot_result.ok:
+            logger.error(
+                "attribute_resolver: failed to write attributes for conversation %s: %s",
+                conversation_id, chatwoot_result.error,
+            )
+
+    return ok
+
+
+async def write_attributes_at_flow_completion(
+    conversation_id: uuid.UUID,
+    chatwoot_conversation_id: int,
+) -> bool:
+    """
+    InfoGatherer entry point. Called immediately after RecEngine completes so
+    that university, gender, and ilgili_otel are visible in Chatwoot without
+    waiting for the next TagAssigner run.
+
+    No run_id: this is not a TagAssigner run. ilgili_otel_set_by is recorded
+    as 'infoGatherer' so the audit trail distinguishes InfoGatherer-written
+    values from TagAssigner-written ones.
+
+    newest_ilgili_otel_evidence_at is None because InfoGatherer is always the
+    *first* writer — the conflict rule allows the write unconditionally when
+    the field has no existing value.
+    """
+    ok, chatwoot_result = await _resolve_and_write(
+        conversation_id,
+        chatwoot_conversation_id,
+        newest_ilgili_otel_evidence_at=None,
+        set_by="infoGatherer",
+    )
+
+    if chatwoot_result is not None and not chatwoot_result.ok:
+        logger.error(
+            "attribute_resolver: InfoGatherer completion write failed for conversation %s: %s",
+            conversation_id, chatwoot_result.error,
+        )
+
+    return ok
+
+
+# ---------------------------------------------------------------------------
+# Shared core
+# ---------------------------------------------------------------------------
+
+async def _resolve_and_write(
+    conversation_id: uuid.UUID,
+    chatwoot_conversation_id: int,
+    newest_ilgili_otel_evidence_at: Optional[datetime],
+    set_by: str,
+):
+    """
+    Resolves attributes from DB state, writes to Chatwoot, syncs ilgili_otel
+    companions. Returns (ok, chatwoot_result) where chatwoot_result is None if
+    there was nothing to write (callers skip logging in that case).
     """
     conv = await queries.get_conversation_by_id(conversation_id)
     if not conv:
-        return False
+        return False, None
 
     attributes: dict = {}
 
@@ -67,26 +146,9 @@ async def resolve_and_write_attributes(
         attributes["ilgili_otel"] = ilgili_otel_value
 
     if not attributes:
-        return True
+        return True, None
 
     result = await set_custom_attributes(chatwoot_conversation_id, attributes)
-
-    await queries.write_tagassigner_log(TagAssignerLog(
-        run_id=run_id,
-        conversation_id=conversation_id,
-        request_type="api",
-        request_from="router",
-        request_to="chatwoot",
-        is_success=result.ok,
-        status_code=str(result.status_code),
-        fail_reason=result.error if not result.ok else None,
-    ))
-
-    if not result.ok:
-        logger.error(
-            "attribute_resolver: failed to write attributes for conversation %s: %s",
-            conversation_id, result.error,
-        )
 
     # If ilgili_otel was written, update the DB companions atomically
     if result.ok and ilgili_otel_value is not None:
@@ -95,10 +157,10 @@ async def resolve_and_write_attributes(
             labels=None,
             ilgili_otel=ilgili_otel_value,
             ilgili_otel_set_at=datetime.now(tz=timezone.utc),
-            ilgili_otel_set_by="tagAssigner",
+            ilgili_otel_set_by=set_by,
         )
 
-    return result.ok
+    return result.ok, result
 
 
 async def _resolve_ilgili_otel(
