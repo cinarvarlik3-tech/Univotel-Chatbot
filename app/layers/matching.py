@@ -66,6 +66,16 @@ def match_university(
     if not normalized:
         return MatchResult(confidence=MatchConfidence.NONE)
 
+    # Parent alias check — runs BEFORE Tier 1 exact match.
+    # A string registered as a parent-level alias is an inherently ambiguous
+    # reference (e.g. "itü", "bau", "ytu") and must always escalate to campus
+    # clarification, even if a campus row happens to carry the same short_name.
+    # Hoisting this above Tier 1 fixes the systemic short_name collision where
+    # one campus was mistakenly given the parent's own identifier.
+    for alias in aliases:
+        if alias.alias == normalized and alias.parent_university_id:
+            return MatchResult(confidence=MatchConfidence.ALIAS, parent_university_id=alias.parent_university_id)
+
     # Tier 1 — exact match against name or short_name
     for uni in universities:
         if normalize(uni.name) == normalized:
@@ -73,13 +83,10 @@ def match_university(
         if uni.university_short_name and normalize(uni.university_short_name) == normalized:
             return MatchResult(confidence=MatchConfidence.EXACT, university_id=uni.id)
 
-    # Tier 2 — alias lookup
+    # Tier 2 — campus-level alias lookup
     for alias in aliases:
-        if alias.alias == normalized:
-            if alias.university_id:
-                return MatchResult(confidence=MatchConfidence.ALIAS, university_id=alias.university_id)
-            elif alias.parent_university_id:
-                return MatchResult(confidence=MatchConfidence.ALIAS, parent_university_id=alias.parent_university_id)
+        if alias.alias == normalized and alias.university_id:
+            return MatchResult(confidence=MatchConfidence.ALIAS, university_id=alias.university_id)
 
     # Tier 3 — Levenshtein ≤ CUTOFF
     hits: list[tuple[int, uuid.UUID]] = []
