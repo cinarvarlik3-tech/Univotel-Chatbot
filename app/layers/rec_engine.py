@@ -89,12 +89,25 @@ async def _select_hotel(conversation_id: uuid.UUID) -> RecResult:
     )
 
     if not candidates:
+        logger.info(
+            "RecEngine: conv=%s uni=%s gender=%s candidates=[] → NOT_FOUND",
+            conversation_id, conv.university_id, conv.gender,
+        )
         return RecResult(status=RecStatus.NOT_FOUND, hotel_id=GLOBAL_NULL_STATE_ID)
 
     if len(candidates) == 1:
         hotel = candidates[0]
     else:
         hotel = max(candidates, key=lambda h: h.priority_score or 0)
+
+    logger.info(
+        "RecEngine: conv=%s uni=%s gender=%s candidates=%s → selected=%s",
+        conversation_id,
+        conv.university_id,
+        conv.gender,
+        [(h.name, h.priority_score) for h in candidates],
+        hotel.name,
+    )
 
     # Stale hotel reference check (§8.4)
     live = await queries.get_hotel_by_id(hotel.id)
