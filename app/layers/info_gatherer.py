@@ -45,6 +45,14 @@ CANNED_CLARIFY = "clarify_uni"
 
 LAYER = "infoGatherer"
 
+# Turkish vowel → question particle for vowel harmony (last-vowel rule)
+_VOWEL_SUFFIX: dict[str, str] = {
+    'a': 'mı', 'A': 'mı', 'ı': 'mı', 'I': 'mı',
+    'e': 'mi', 'E': 'mi', 'i': 'mi', 'İ': 'mi',
+    'o': 'mu', 'O': 'mu', 'u': 'mu', 'U': 'mu',
+    'ö': 'mü', 'Ö': 'mü', 'ü': 'mü', 'Ü': 'mü',
+}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -137,6 +145,32 @@ def _extract_university_candidate(text: str) -> Optional[str]:
     return None
 
 
+def _turkish_question_suffix(word: str) -> str:
+    """Return the vowel-harmonised question particle (mı/mi/mu/mü) for a Turkish word."""
+    for ch in reversed(word):
+        if ch in _VOWEL_SUFFIX:
+            return _VOWEL_SUFFIX[ch]
+    return "mı"  # fallback for words with no recognisable vowel
+
+
+async def _build_campus_question(parent_id: uuid.UUID) -> Optional[str]:
+    """
+    Assemble the parent university's escalation question with live campus options.
+    Returns None if the parent or its campuses cannot be fetched.
+    """
+    parent = await queries.get_parent_university_by_id(parent_id)
+    if not parent:
+        logger.error("InfoGatherer: parent_university_id=%s not found", parent_id)
+        return None
+    campuses = await queries.get_campuses_for_parent(parent_id)
+    if not campuses:
+        logger.error("InfoGatherer: no campus rows for parent_university_id=%s", parent_id)
+        return None
+    parts = [f"{c.campus_label} {_turkish_question_suffix(c.campus_label)}" for c in campuses]
+    campuses_str = ", ".join(parts)
+    return parent.question.format(name=parent.name, campuses=campuses_str)
+
+
 async def _write_deal_awaiting_label(chatwoot_id: int) -> None:
     """
     Push the 'deal_awaiting' label to Chatwoot.
@@ -186,6 +220,51 @@ async def _handle_post_match(
     await _send_canned(cwid, CANNED_KIZ_ERKEK)
 
 
+async def _handle_parent_match(
+    conversation: Conversation,
+    cwid: int,
+    parent_university_id: uuid.UUID,
+) -> None:
+    """
+    Alias resolved to a parent university. If the parent has exactly one campus,
+    resolve directly. If it has multiple, send the escalation question and park
+    the conversation in awaiting_campus_clarification.
+    """
+    cid = conversation.id
+    campuses = await queries.get_campuses_for_parent(parent_university_id)
+
+    if len(campuses) == 1:
+        await _handle_post_match(conversation, cwid, campuses[0].university_id)
+        return
+
+    if not campuses:
+        await _escalate_human_needed(
+            cid,
+            f"Parent university {parent_university_id} has no campus rows — cannot escalate",
+        )
+        return
+
+    question = await _build_campus_question(parent_university_id)
+    if not question:
+        await _escalate_human_needed(
+            cid,
+            f"Failed to build campus question for parent {parent_university_id}",
+        )
+        return
+
+    advanced = await queries.update_conversation_state(
+        cid, "awaiting_campus_clarification", conversation.flow_state
+    )
+    if not advanced:
+        return
+    await queries.set_conversation_pending_parent(cid, parent_university_id)
+    result = await send_with_retry(cwid, question)
+    if not result.ok:
+        logger.error(
+            "InfoGatherer: failed to send campus escalation question for conversation %s", cid
+        )
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -206,6 +285,10 @@ async def process_message(
 
     if not content:
         logger.info("InfoGatherer: empty message in conversation %s — keeping state", cid)
+        return
+
+    if state == "awaiting_campus_clarification":
+        await _handle_awaiting_campus_clarification(conversation, cwid, content)
         return
 
     if state == "awaiting_gender":
@@ -281,6 +364,10 @@ async def _handle_new(
             await _send_canned(cwid, CANNED_CLARIFY)
             return
 
+        elif result.parent_university_id:
+            await _handle_parent_match(conversation, cwid, result.parent_university_id)
+            return
+
         elif result.university_id:
             await _handle_post_match(conversation, cwid, result.university_id)
             return
@@ -320,6 +407,10 @@ async def _handle_awaiting_university(
         await _send_canned(cwid, CANNED_CLARIFY)
         return
 
+    if result.parent_university_id:
+        await _handle_parent_match(conversation, cwid, result.parent_university_id)
+        return
+
     if result.university_id:
         await _handle_post_match(conversation, cwid, result.university_id)
 
@@ -341,8 +432,58 @@ async def _handle_clarification(
         )
         return
 
+    if result.parent_university_id:
+        await _handle_parent_match(conversation, cwid, result.parent_university_id)
+        return
+
     if result.university_id:
         await _handle_post_match(conversation, cwid, result.university_id)
+
+
+async def _handle_awaiting_campus_clarification(
+    conversation: Conversation,
+    cwid: int,
+    content: str,
+) -> None:
+    """
+    The lead replied to a campus escalation question (e.g. "Maçka mı, Ayazağa mı?").
+    Match the reply against the pending parent's campus list.
+    """
+    from app.layers.matching import normalize
+
+    cid = conversation.id
+    parent_id = conversation.pending_parent_university_id
+    if not parent_id:
+        await _escalate_human_needed(
+            cid,
+            "awaiting_campus_clarification with no pending_parent_university_id — data inconsistency",
+            internal_class="missing_pending_parent",
+        )
+        return
+
+    campuses = await queries.get_campuses_for_parent(parent_id)
+    if not campuses:
+        await _escalate_human_needed(
+            cid, f"No campus rows for pending parent {parent_id}"
+        )
+        return
+
+    normalized_reply = normalize(content)
+    matched = None
+    for campus in campuses:
+        if normalize(campus.campus_label) == normalized_reply:
+            matched = campus
+            break
+
+    if not matched:
+        await _escalate_human_needed(
+            cid,
+            f"Campus clarification reply '{content[:80]}' did not match any campus label — escalating to human",
+        )
+        return
+
+    await queries.set_conversation_pending_parent(cid, None)
+    await _handle_post_match(conversation, cwid, matched.university_id)
 
 
 async def _handle_awaiting_gender(

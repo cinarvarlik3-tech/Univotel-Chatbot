@@ -35,14 +35,15 @@ async def resolve_and_write_attributes(
 
     attributes: dict = {}
 
-    # university: FK → human-readable name
+    # university: FK → exact Chatwoot List string via university_chatwoot_label_map
     if conv.university_id:
-        uni = await queries.get_university_by_id(conv.university_id)
-        if uni:
-            attributes["university"] = uni.name
+        list_value = await queries.get_chatwoot_list_value_for_university(conv.university_id)
+        if list_value:
+            attributes["university"] = list_value
         else:
-            logger.error(
-                "attribute_resolver: university_id=%s has no universities row (conversation=%s)",
+            logger.warning(
+                "attribute_resolver: university_id=%s has no university_chatwoot_label_map row "
+                "— skipping university attribute (conversation=%s)",
                 conv.university_id, conversation_id,
             )
 

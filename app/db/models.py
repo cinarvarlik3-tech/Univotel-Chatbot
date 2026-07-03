@@ -21,8 +21,9 @@ class University(BaseModel):
 
 class UniversityAlias(BaseModel):
     id: uuid.UUID
-    university_id: uuid.UUID
     alias: str
+    university_id: Optional[uuid.UUID] = None
+    parent_university_id: Optional[uuid.UUID] = None
 
 
 class Conversation(BaseModel):
@@ -40,6 +41,8 @@ class Conversation(BaseModel):
     auto_run_count: int = 0
     manual_run_count: int = 0
     labels: list[str] = []
+    # Parent-university escalation — set while awaiting campus clarification
+    pending_parent_university_id: Optional[uuid.UUID] = None
     # Chatwoot custom-attribute columns
     ilgili_otel: Optional[str] = None
     tasinma_tarihi: Optional[date] = None
@@ -102,6 +105,23 @@ class ChatbotLog(BaseModel):
 class HotelChatwootLabelMap(BaseModel):
     hotel_id: uuid.UUID
     chatwoot_list_value: str
+
+
+class UniversityChatwootLabelMap(BaseModel):
+    university_id: uuid.UUID
+    chatwoot_list_value: str
+
+
+class ParentUniversity(BaseModel):
+    id: uuid.UUID
+    name: str
+    question: str
+
+
+class UniversityParentMap(BaseModel):
+    university_id: uuid.UUID
+    parent_university_id: uuid.UUID
+    campus_label: str
 
 
 class TagAssignerRun(BaseModel):

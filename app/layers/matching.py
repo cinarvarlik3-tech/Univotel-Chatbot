@@ -38,6 +38,7 @@ class MatchConfidence(str, Enum):
 class MatchResult:
     confidence: MatchConfidence
     university_id: Optional[uuid.UUID] = None
+    parent_university_id: Optional[uuid.UUID] = None
 
 
 def normalize(text: str) -> str:
@@ -75,7 +76,10 @@ def match_university(
     # Tier 2 — alias lookup
     for alias in aliases:
         if alias.alias == normalized:
-            return MatchResult(confidence=MatchConfidence.ALIAS, university_id=alias.university_id)
+            if alias.university_id:
+                return MatchResult(confidence=MatchConfidence.ALIAS, university_id=alias.university_id)
+            elif alias.parent_university_id:
+                return MatchResult(confidence=MatchConfidence.ALIAS, parent_university_id=alias.parent_university_id)
 
     # Tier 3 — Levenshtein ≤ CUTOFF
     hits: list[tuple[int, uuid.UUID]] = []

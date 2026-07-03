@@ -7,6 +7,10 @@ Checks:
 3. GLOBAL-NULL-STATE hotel exists and has its response_schemas wired.
 4. DEAL-AWAITING-STATE hotel exists and has its response_schemas wired.
 5. Every visible (recommendable) hotel has a hotel_chatwoot_label_map row.
+6. Every campus in university_parent_map has a university_chatwoot_label_map row.
+7. Every university has a university_parent_map row.
+8. No orphaned campus rows in university_parent_map (parent must exist).
+9. No duplicate campus_label values within a single parent university.
 
 Any failure logs fatal and raises RuntimeError on boot (fast-fail).
 Daily sweep logs fatal but does not kill the process.
@@ -64,6 +68,42 @@ async def run_integrity_check(fatal_on_failure: bool = True) -> bool:
             "INTEGRITY: %d visible hotel(s) have no hotel_chatwoot_label_map row "
             "(TagAssigner ilgili_otel writes will fail for these hotels): %s",
             len(unmapped), [str(h) for h in unmapped],
+        )
+        ok = False
+
+    campus_unmapped = await queries.get_campus_university_ids_missing_chatwoot_label_map()
+    if campus_unmapped:
+        logger.fatal(
+            "INTEGRITY: %d campus(es) have no university_chatwoot_label_map row "
+            "(TagAssigner university writes will fail for these): %s",
+            len(campus_unmapped), [str(u) for u in campus_unmapped],
+        )
+        ok = False
+
+    missing_parent_map = await queries.get_universities_missing_parent_map()
+    if missing_parent_map:
+        logger.fatal(
+            "INTEGRITY: %d university/universities have no university_parent_map row "
+            "(campus escalation logic assumes every university has a parent): %s",
+            len(missing_parent_map), [str(u) for u in missing_parent_map],
+        )
+        ok = False
+
+    orphan_campuses = await queries.get_parent_map_orphan_campuses()
+    if orphan_campuses:
+        logger.fatal(
+            "INTEGRITY: %d campus row(s) in university_parent_map reference a "
+            "non-existent parent_universities row: %s",
+            len(orphan_campuses), [str(u) for u in orphan_campuses],
+        )
+        ok = False
+
+    dupe_label_parents = await queries.get_parent_ids_with_duplicate_campus_labels()
+    if dupe_label_parents:
+        logger.fatal(
+            "INTEGRITY: %d parent university/universities have duplicate campus_label "
+            "values (escalation question would repeat the same option): %s",
+            len(dupe_label_parents), [str(p) for p in dupe_label_parents],
         )
         ok = False
 

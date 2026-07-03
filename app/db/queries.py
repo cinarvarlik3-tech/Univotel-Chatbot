@@ -13,7 +13,9 @@ from app.db.client import get_pool
 from app.db.models import (
     Conversation, Hotel, University, UniversityAlias,
     CannedResponse, ResponseSchema, RecEngineLog, ChatbotLog,
-    HotelChatwootLabelMap, TagAssignerRun, TagAssignerLog, TagAssignerQueueItem,
+    HotelChatwootLabelMap, UniversityChatwootLabelMap,
+    ParentUniversity, UniversityParentMap,
+    TagAssignerRun, TagAssignerLog, TagAssignerQueueItem,
     Message,
 )
 
@@ -145,6 +147,7 @@ async def get_conversations_awaiting_reprompt() -> list[Conversation]:
         WHERE flow_state IN (
             'awaiting_university',
             'awaiting_university_clarification',
+            'awaiting_campus_clarification',
             'awaiting_gender'
         )
         AND reprompt_count < 3
@@ -470,6 +473,19 @@ async def get_chatwoot_list_value_for_hotel(hotel_id: uuid.UUID) -> Optional[str
 
 
 # ---------------------------------------------------------------------------
+# university_chatwoot_label_map
+# ---------------------------------------------------------------------------
+
+async def get_chatwoot_list_value_for_university(university_id: uuid.UUID) -> Optional[str]:
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT chatwoot_list_value FROM university_chatwoot_label_map WHERE university_id = $1",
+        university_id,
+    )
+    return row["chatwoot_list_value"] if row else None
+
+
+# ---------------------------------------------------------------------------
 # Universities
 # ---------------------------------------------------------------------------
 
@@ -481,7 +497,9 @@ async def get_all_universities() -> list[University]:
 
 async def get_all_university_aliases() -> list[UniversityAlias]:
     pool = get_pool()
-    rows = await pool.fetch("SELECT id, university_id, alias FROM university_aliases")
+    rows = await pool.fetch(
+        "SELECT id, university_id, alias, parent_university_id FROM university_aliases"
+    )
     return [UniversityAlias(**dict(r)) for r in rows]
 
 
@@ -492,6 +510,39 @@ async def get_university_by_id(university_id: uuid.UUID) -> Optional[University]
         university_id,
     )
     return University(**dict(row)) if row else None
+
+
+async def set_conversation_pending_parent(
+    conversation_id: uuid.UUID, parent_university_id: Optional[uuid.UUID]
+) -> None:
+    pool = get_pool()
+    await pool.execute(
+        "UPDATE conversations SET pending_parent_university_id = $1, last_updated_at = now() WHERE id = $2",
+        parent_university_id, conversation_id,
+    )
+
+
+async def get_campuses_for_parent(parent_university_id: uuid.UUID) -> list[UniversityParentMap]:
+    pool = get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT university_id, parent_university_id, campus_label
+        FROM university_parent_map
+        WHERE parent_university_id = $1
+        ORDER BY campus_label
+        """,
+        parent_university_id,
+    )
+    return [UniversityParentMap(**dict(r)) for r in rows]
+
+
+async def get_parent_university_by_id(parent_id: uuid.UUID) -> Optional[ParentUniversity]:
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT id, name, question FROM parent_universities WHERE id = $1",
+        parent_id,
+    )
+    return ParentUniversity(**dict(row)) if row else None
 
 
 async def is_deal_awaiting_university(university_id: uuid.UUID) -> bool:
@@ -882,3 +933,58 @@ async def get_visible_hotels_missing_label_map() -> list[uuid.UUID]:
         GLOBAL_NULL_STATE_ID, DEAL_AWAITING_STATE_ID,
     )
     return [r["id"] for r in rows]
+
+
+async def get_campus_university_ids_missing_chatwoot_label_map() -> list[uuid.UUID]:
+    """Campus rows in university_parent_map with no university_chatwoot_label_map entry."""
+    pool = get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT upm.university_id FROM university_parent_map upm
+        WHERE NOT EXISTS (
+            SELECT 1 FROM university_chatwoot_label_map m WHERE m.university_id = upm.university_id
+        )
+        """
+    )
+    return [r["university_id"] for r in rows]
+
+
+async def get_universities_missing_parent_map() -> list[uuid.UUID]:
+    """University ids with no row in university_parent_map."""
+    pool = get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT u.id FROM universities u
+        WHERE NOT EXISTS (
+            SELECT 1 FROM university_parent_map upm WHERE upm.university_id = u.id
+        )
+        """
+    )
+    return [r["id"] for r in rows]
+
+
+async def get_parent_map_orphan_campuses() -> list[uuid.UUID]:
+    """Campus rows in university_parent_map whose parent doesn't exist in parent_universities."""
+    pool = get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT upm.university_id FROM university_parent_map upm
+        WHERE NOT EXISTS (
+            SELECT 1 FROM parent_universities p WHERE p.id = upm.parent_university_id
+        )
+        """
+    )
+    return [r["university_id"] for r in rows]
+
+
+async def get_parent_ids_with_duplicate_campus_labels() -> list[uuid.UUID]:
+    """Parent university ids where two or more campus rows share the same campus_label."""
+    pool = get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT parent_university_id FROM university_parent_map
+        GROUP BY parent_university_id, campus_label
+        HAVING COUNT(*) > 1
+        """
+    )
+    return [r["parent_university_id"] for r in rows]
