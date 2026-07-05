@@ -26,6 +26,8 @@ router = APIRouter()
 class RecEngineStartRequest(BaseModel):
     conversation_id: uuid.UUID
     idempotency_key: uuid.UUID
+    university_id_override: Optional[uuid.UUID] = None
+    gender_override: Optional[str] = None
 
 
 @router.post("/internal/recengine/start")
@@ -45,7 +47,12 @@ async def start_rec_engine(
         return JSONResponse(status_code=200, content={"status": "already_processing"})
 
     from app.layers.rec_engine import run_rec_engine
-    asyncio.create_task(run_rec_engine(body.conversation_id, body.idempotency_key))
+    asyncio.create_task(run_rec_engine(
+        body.conversation_id,
+        body.idempotency_key,
+        university_id_override=body.university_id_override,
+        gender_override=body.gender_override,
+    ))
 
     return JSONResponse(status_code=200, content={"status": "started"})
 

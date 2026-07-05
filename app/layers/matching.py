@@ -2,17 +2,20 @@
 University matching algorithm (§8.1).
 Three tiers: exact → alias → Levenshtein ≤ 2.
 Returns a MatchResult describing confidence and the matched university_id.
+
+Also exposes n-gram scanning helpers for phrase-gate entity and hotel matching.
 """
 from __future__ import annotations
+import re
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Iterator, Optional
 
 from rapidfuzz.distance import Levenshtein as _Lev
 levenshtein_distance = _Lev.distance
 
-from app.db.models import University, UniversityAlias
+from app.db.models import Hotel, University, UniversityAlias
 
 LEVENSHTEIN_CUTOFF = 2
 
@@ -53,6 +56,28 @@ def normalize(text: str) -> str:
     return text
 
 
+def tokenize(text: str) -> list[str]:
+    """Split normalized text into word tokens for n-gram windows."""
+    normalized = normalize(text)
+    if not normalized:
+        return []
+    return normalized.split()
+
+
+def scan_ngrams(text: str, min_n: int = 1, max_n: int = 4) -> Iterator[str]:
+    """
+    Yield contiguous word n-grams longest-first (max_n down to min_n).
+    Used by phrase-gate entity and hotel scans.
+    """
+    words = tokenize(text)
+    if not words:
+        return
+    upper = min(max_n, len(words))
+    for n in range(upper, min_n - 1, -1):
+        for i in range(len(words) - n + 1):
+            yield " ".join(words[i : i + n])
+
+
 def match_university(
     raw_text: str,
     universities: list[University],
@@ -67,14 +92,12 @@ def match_university(
         return MatchResult(confidence=MatchConfidence.NONE)
 
     # Parent alias check — runs BEFORE Tier 1 exact match.
-    # A string registered as a parent-level alias is an inherently ambiguous
-    # reference (e.g. "itü", "bau", "ytu") and must always escalate to campus
-    # clarification, even if a campus row happens to carry the same short_name.
-    # Hoisting this above Tier 1 fixes the systemic short_name collision where
-    # one campus was mistakenly given the parent's own identifier.
     for alias in aliases:
-        if alias.alias == normalized and alias.parent_university_id:
-            return MatchResult(confidence=MatchConfidence.ALIAS, parent_university_id=alias.parent_university_id)
+        if normalize(alias.alias) == normalized and alias.parent_university_id:
+            return MatchResult(
+                confidence=MatchConfidence.ALIAS,
+                parent_university_id=alias.parent_university_id,
+            )
 
     # Tier 1 — exact match against name or short_name
     for uni in universities:
@@ -85,7 +108,7 @@ def match_university(
 
     # Tier 2 — campus-level alias lookup
     for alias in aliases:
-        if alias.alias == normalized and alias.university_id:
+        if normalize(alias.alias) == normalized and alias.university_id:
             return MatchResult(confidence=MatchConfidence.ALIAS, university_id=alias.university_id)
 
     # Tier 3 — Levenshtein ≤ CUTOFF
@@ -106,3 +129,45 @@ def match_university(
         return MatchResult(confidence=MatchConfidence.LEVENSHTEIN, university_id=closest[0])
 
     return MatchResult(confidence=MatchConfidence.AMBIGUOUS)
+
+
+def scan_entities_by_ngram(
+    text: str,
+    universities: list[University],
+    aliases: list[UniversityAlias],
+) -> MatchResult:
+    """
+    Phrase-gate Filter 2: scan 1–4 word n-grams (longest first) via match_university.
+    """
+    for candidate in scan_ngrams(text):
+        result = match_university(candidate, universities, aliases)
+        if result.confidence != MatchConfidence.NONE:
+            return result
+    return MatchResult(confidence=MatchConfidence.NONE)
+
+
+def match_hotel_by_ngram(text: str, hotels: list[Hotel]) -> Optional[Hotel]:
+    """
+    Pre-condition B / hotel path: n-gram Levenshtein scan against hotels.name.
+    Returns the first matching visible hotel (longest n-gram wins via scan order).
+    """
+    for candidate in scan_ngrams(text):
+        normalized_candidate = normalize(candidate)
+        if not normalized_candidate:
+            continue
+        for hotel in hotels:
+            if not hotel.is_visible:
+                continue
+            normalized_name = normalize(hotel.name)
+            if not normalized_name:
+                continue
+            if normalized_candidate == normalized_name:
+                return hotel
+            if levenshtein_distance(normalized_candidate, normalized_name) <= LEVENSHTEIN_CUTOFF:
+                return hotel
+    return None
+
+
+def word_count_after_normalize(text: str) -> int:
+    """Token count after normalize(); used for invalid-university input handling."""
+    return len(tokenize(text))

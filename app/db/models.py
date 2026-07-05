@@ -43,6 +43,7 @@ class Conversation(BaseModel):
     labels: list[str] = []
     # Parent-university escalation — set while awaiting campus clarification
     pending_parent_university_id: Optional[uuid.UUID] = None
+    clarification_attempt: int = 0
     # Chatwoot custom-attribute columns
     ilgili_otel: Optional[str] = None
     tasinma_tarihi: Optional[date] = None

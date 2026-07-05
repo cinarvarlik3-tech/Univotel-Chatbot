@@ -21,6 +21,8 @@ async def fire_rec_engine(
     conversation_id: uuid.UUID,
     chatwoot_conversation_id: int,
     idempotency_key: uuid.UUID,
+    university_id_override: uuid.UUID | None = None,
+    gender_override: str | None = None,
 ) -> None:
     """
     Fire RecEngine via the internal HTTP endpoint, then poll rec_engine_logs
@@ -32,7 +34,10 @@ async def fire_rec_engine(
     headers = {"X-Internal-Secret": settings.internal_shared_secret}
 
     for attempt in range(1, 4):
-        await _post_start(url, headers, conversation_id, idempotency_key)
+        await _post_start(
+            url, headers, conversation_id, idempotency_key,
+            university_id_override, gender_override,
+        )
         await asyncio.sleep(ATTEMPT_DELAYS[attempt - 1])
 
         log = await queries.get_rec_engine_log(idempotency_key)
@@ -61,15 +66,22 @@ async def _post_start(
     headers: dict,
     conversation_id: uuid.UUID,
     idempotency_key: uuid.UUID,
+    university_id_override: uuid.UUID | None = None,
+    gender_override: str | None = None,
 ) -> None:
+    payload = {
+        "conversation_id": str(conversation_id),
+        "idempotency_key": str(idempotency_key),
+    }
+    if university_id_override is not None:
+        payload["university_id_override"] = str(university_id_override)
+    if gender_override is not None:
+        payload["gender_override"] = gender_override
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
             resp = await client.post(
                 url,
-                json={
-                    "conversation_id": str(conversation_id),
-                    "idempotency_key": str(idempotency_key),
-                },
+                json=payload,
                 headers=headers,
             )
         if resp.status_code != 200:

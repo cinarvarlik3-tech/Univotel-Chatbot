@@ -178,7 +178,7 @@ cp .env.example .env
 # Edit .env with real values (see Environment Variables below)
 
 # 5. Apply migrations (manual — see Migrations section)
-# Run migrations/001 through migrations/013 in order via Supabase SQL editor.
+# Run migrations/001 through migrations/014 in order via Supabase SQL editor.
 # Also apply external seed files referenced in docs (parent universities, label maps).
 
 # 6. Run the server
@@ -192,7 +192,7 @@ curl http://localhost:8000/health
 ### First-run checklist
 
 - [ ] `DATABASE_URL` points to the ChatBot Supabase project
-- [ ] Migrations 001–013 applied; migration 013 confirmed on production-like DB
+- [ ] Migrations 001–014 applied; migrations 013 and 014 confirmed on production-like DB
 - [ ] `INTEGRITY_CHECK_BYPASS=false` for a real boot test (app should start cleanly)
 - [ ] `TESTING_LIMITATIONS_MODE=true` until production sign-off
 - [ ] Chatwoot webhook URL points to your deployment's `/webhooks/chatwoot`
@@ -267,13 +267,14 @@ Univotel Chatbot/
 │   ├── db/
 │   │   ├── client.py                # asyncpg connection pool
 │   │   ├── models.py                # Pydantic DTOs mirroring tables
-│   │   └── queries.py               # All SQL access (~990 lines — single data layer)
+│   │   └── queries.py               # All SQL access (~1040 lines — single data layer)
 │   ├── webhooks/
 │   │   ├── chatwoot.py              # POST /webhooks/chatwoot — primary inbound entry
 │   │   ├── internal.py              # RecEngine start + InfoGatherer callback
 │   │   └── batch_results.py         # POST /webhooks/batch-results — Gemini batch callback
 │   ├── layers/
 │   │   ├── info_gatherer.py         # ContextRun state machine
+│   │   ├── phrase_gate.py           # First-message gate (7 filters + pre-conditions A/B)
 │   │   ├── rec_engine.py            # Hotel selection by gender + university
 │   │   └── matching.py              # University matching (exact → alias → Levenshtein)
 │   ├── background/
@@ -292,8 +293,8 @@ Univotel Chatbot/
 │       ├── label_resolver.py        # 4-list taxonomy enforcement
 │       ├── attribute_resolver.py    # Deterministic Chatwoot attribute writes
 │       └── conflict.py              # Option-A timestamp conflict rule for ilgili_otel
-├── migrations/                      # 13 SQL migrations (001–013), applied manually
-├── tests/                           # Unit tests (7 modules + conftest)
+├── migrations/                      # 14 SQL migrations (001–014), applied manually
+├── tests/                           # Unit tests (8 modules + conftest)
 ├── docs/                            # Specs, audits, test plans, SQL audit scripts
 ├── system_prompts/
 │   └── tagassigner_prompt.md        # Gemini system prompt for TagAssigner
@@ -311,10 +312,13 @@ Univotel Chatbot/
 |------|-----|
 | `app/main.py` | App entry, lifespan, all background task startup |
 | `app/layers/info_gatherer.py` | Core business logic — state machine |
+| `app/layers/phrase_gate.py` | First-inbound phrase gate — 7 filters + pre-conditions |
 | `app/db/queries.py` | Every database operation |
 | `app/webhooks/chatwoot.py` | Inbound message handling, dedupe, testing gate |
 | `app/tagassigner/router.py` | TagAssigner pipeline orchestration |
 | `docs/univotel-chatbot-spec.md` | V0 master spec |
+| `docs/chatbot-phrase-gate-and-matching-spec.md` | Phrase gate, clarification, matching spec |
+| `docs/matching-fixes-impl-spec.md` | Pending matching/clarification fixes (F6, F8) |
 | `docs/tagassigner-v1-spec.md` | V1 TagAssigner spec |
 | `docs/v1-audit.md` | Production readiness audit |
 
@@ -358,7 +362,7 @@ FastAPI also exposes `/docs`, `/redoc`, `/openapi.json` automatically.
 
 ```
 InfoGatherer
-  → POST /internal/recengine/start  {conversation_id, idempotency_key}
+  → POST /internal/recengine/start  {conversation_id, idempotency_key, university_id_override?, gender_override?}
     → asyncio.create_task(run_rec_engine)
       → DB hotel selection
       → POST /internal/infogatherer/callback  {conversation_id, hotel_rec, status}
@@ -372,7 +376,7 @@ Internal calls loop through `http://localhost:{PORT}` with `X-Internal-Secret`. 
 
 ## Layer 1: InfoGatherer
 
-**Module:** `app/layers/info_gatherer.py`
+**Module:** `app/layers/info_gatherer.py` (phrase gate in `app/layers/phrase_gate.py`)
 
 InfoGatherer is a **finite state machine** with optimistic locking via `update_conversation_state(expected_from_state)`. It does not attempt general conversation — every path terminates in `completed`, `human_needed`, `stopped`, or waits in an awaiting state.
 
@@ -394,33 +398,39 @@ InfoGatherer is a **finite state machine** with optimistic locking via `update_c
 
 ### ContextRun steps (state `new`)
 
-**Step 1 — Phrase gate.** Message must contain at least one exact substring:
+**Step 1 — Phrase gate** (`app/layers/phrase_gate.py`). Evaluated on every inbound message in `new`; see [`docs/chatbot-phrase-gate-and-matching-spec.md`](docs/chatbot-phrase-gate-and-matching-spec.md) for the full spec.
 
-```
-"Üniversitem:"
-"Merhaba!"          ← exclamation required; "merhaba" fails
-"My University:"
-"Hello!"            ← exclamation required
-"Başvuru Kodu:"
-```
+| Outcome | Behavior |
+|---------|----------|
+| **Pre-condition B — hotel match** | N-gram scan against `hotels.name` (exact or Levenshtein ≤ 2) fires on **any** message, even mid-conversation → direct hotel path |
+| **Pre-condition A — first inbound** | Keyword filters run only on the conversation's first inbound message (`queries.is_first_inbound_message`) |
+| **`GREETING`** | At least one filter matched → continue ContextRun below |
+| **`IGNORE`** | No filter matched on first inbound → log only, **no state change**, no Chatwoot message; conversation stays in `new` |
+| **`HOTEL_PATH`** | Pre-condition B matched → `_fire_hotel_path` (schemas + attributes, no RecEngine) |
 
-No match → `human_needed` with **no outbound message** (known production risk — see [Known Issues](#known-issues--open-decisions)).
+**First-inbound filters** (any one passes → `GREETING`):
 
-**Step 2 — Direct hotel-name match.** If message matches `hotels.name` → send that hotel's `response_schemas`, state → `completed`. No gender/university, no RecEngine.
+1. **Widget templates** — fixed Chatwoot pre-fill strings (exact substring or Levenshtein ≤ 2 on full message), plus wildcard `"Merhaba!" … "yakınında öğrenci konaklaması"`
+2. **Entity n-gram** — 1–4 word windows scanned via `scan_entities_by_ngram()` (longest match first)
+3. **Greetings** — `merhaba`, `merhabalar`, `selam`, `iyi günler`, `hello`, etc.
+4. **Housing intent** — `konaklama`, `yurt`, `oda`, `öğrenci oteli`, …
+5. **Staj/dönem** — `staj`, `yaz dönemi`, `güz dönemi`, …
+6. **Proximity** — `yakınında`, `üniversiteme yakın`, `en yakın`, …
+7. **Price/info** — at least 2 of `{fiyat, bilgi, icin}` in normalized text
+
+**Step 2 — Direct hotel-name match (fallback).** If phrase gate did not already fire the hotel path, `match_hotel_by_ngram()` scans 1–4 word n-grams against `hotels.name` → send that hotel's `response_schemas`, state → `completed`. No gender/university, no RecEngine.
 
 **Step 3 — `Üniversitem:` line match.** Search that line ±1 line for university match. Match → set `university_id`, proceed to gender or `deal_awaiting` check.
 
 **Step 4 — Keyword-based match.** Search for `Üniversitesi`, `Üni`, `uni`, etc.; run matching on same line ±1 line.
 
-**Out-of-Istanbul check:** If university keywords found but no match in narrow or wide windows → send `/istanbul` canned response, stop. Not a `human_needed` escalation.
-
 **Step 5 — Direct ask.** Send canned `hangi`, state → `awaiting_university`.
 
-**Ambiguous match (Levenshtein tie):** Send clarification ("Tam ismi neydi efendim üniversitenizin, kısaltmadan çıkaramadım?"), state → `awaiting_university_clarification`. One round only — still ambiguous → `human_needed`.
+**Ambiguous match (Levenshtein tie):** Send `clarify_uni` canned ("Tam ismi neydi efendim üniversitenizin, kısaltmadan çıkaramadım?"), state → `awaiting_university_clarification`. One clarification round — still ambiguous or no-match → out-of-Istanbul canned (`istanbul`), state → `completed`.
 
-**Campus escalation:** Parent-level alias (e.g. `"itü"`, `"bau"`) → ask campus question from `parent_universities.question` template, state → `awaiting_campus_clarification`.
+**Campus escalation:** Parent-level alias (e.g. `"itü"`, `"bau"`) → ask campus question from `parent_universities.question` template, state → `awaiting_campus_clarification`. If the parent has **only one campus**, skip the question and resolve directly.
 
-**Step 6 — Gender ask.** Always asked — never inferred. Send `kiz-erkek`, state → `awaiting_gender`.
+**Step 6 — Gender ask.** Send `kiz-erkek`, state → `awaiting_gender`. Gender may be extracted from the opening message and written to DB early, but the gender prompt is **always sent** after university resolution.
 
 | Reply contains | Gender |
 |----------------|--------|
@@ -429,6 +439,30 @@ No match → `human_needed` with **no outbound message** (known production risk 
 | No match | `human_needed` |
 
 Once `university_id` and `gender` are confirmed → fire RecEngine (state → `recengine_running`).
+
+### Invalid input handling (`awaiting_university`, `awaiting_university_clarification`, `awaiting_campus_clarification`)
+
+Requires migration **014** (`clarification_attempt` column + `clarify_*` canned responses).
+
+**University not matched** (`awaiting_university`):
+
+| Attempt | Behavior |
+|---------|----------|
+| First | Send `clarify_uni_name` ("Efendim üniversite ismini çıkaramadım…"). If input is **> 2 words** after normalize, also advance to `awaiting_university_clarification`. If **≤ 2 words**, stay in `awaiting_university`. |
+| Second (in `awaiting_university_clarification`, or after a second short reply) | Send out-of-Istanbul canned (`istanbul`), state → `completed`. *Planned change:* silent `human_needed` for all second failures — see [`docs/matching-fixes-impl-spec.md`](docs/matching-fixes-impl-spec.md). |
+
+**Levenshtein ambiguous tie** (any step): Send `clarify_uni`, state → `awaiting_university_clarification`. Second failure in that state → same out-of-Istanbul path as above (also slated for silent escalation in matching-fixes spec).
+
+**Campus not matched** (`awaiting_campus_clarification`):
+
+| Attempt | Behavior |
+|---------|----------|
+| First | Send `clarify_campus_name`, increment `clarification_attempt`, stay in `awaiting_campus_clarification` |
+| Second (`clarification_attempt >= 1`) | Silent `_escalate_human_needed()` — DB write only, no Chatwoot message |
+
+`clarification_attempt` resets on any successful university or campus match. Campus matching currently compares `campus_label` only; alias lookup in this state is planned in matching-fixes spec (e.g. `taşkışla` after an İTÜ escalation question).
+
+**Gender not matched** (`awaiting_gender`): Silent `human_needed`.
 
 ### `deal_awaiting` path (V0 amendment)
 
@@ -494,7 +528,7 @@ UPDATE conversations SET flow_state = :new_state
 
 **Module:** `app/layers/rec_engine.py`
 
-Triggered by InfoGatherer after gender capture. Selects the best hotel for the lead's university and gender.
+Triggered by InfoGatherer after gender capture. Selects the best hotel for the lead's university and gender. The internal start endpoint also accepts optional `university_id_override` and `gender_override` for runtime parameter overrides (see `app/webhooks/internal.py`).
 
 ### Selection algorithm
 
@@ -538,7 +572,7 @@ If resolved `hotel_id` no longer exists in `hotels`, RecEngine reruns selection 
 
 **Module:** `app/layers/matching.py`
 
-Pure function pipeline used by InfoGatherer. Fully unit-tested.
+Pure function pipeline used by InfoGatherer and phrase gate. Fully unit-tested.
 
 ### Algorithm
 
@@ -555,7 +589,9 @@ normalize(text)     # lowercase, strip Turkish diacritics, strip university suff
 
 **Parent alias hoisting:** Parent-level aliases (e.g. `"itü"`) are checked **before** Tier 1 exact match. This prevents a campus `short_name` collision from skipping campus escalation.
 
-**Levenshtein cutoff:** Fixed at 2 (`LEVENSHTEIN_CUTOFF`). Not a tunable score — deliberate design choice to avoid scoring-layer maintenance.
+**Levenshtein cutoff:** Fixed at 2 (`LEVENSHTEIN_CUTOFF`) for university Tier 3 and hotel n-gram matching. Dynamic length-based cutoff is specced in [`docs/matching-fixes-impl-spec.md`](docs/matching-fixes-impl-spec.md) but not yet implemented.
+
+**N-gram helpers:** `tokenize()`, `scan_ngrams()`, `scan_entities_by_ngram()`, `match_hotel_by_ngram()`, and `word_count_after_normalize()` support phrase-gate entity detection, hotel-name paths, and invalid-input word-count logic.
 
 **Empty input:** Whitespace-only after normalization = no-match (same as zero hits).
 
@@ -696,7 +732,7 @@ V2 will also unlock sales-action labels (`aranacak`, `arandi`, etc.) via NetGSM/
 
 - **PostgreSQL** on Supabase (ChatBot project)
 - **asyncpg** connection pool — no ORM
-- All SQL in `app/db/queries.py` (~990 lines)
+- All SQL in `app/db/queries.py` (~1040 lines)
 - Pydantic DTOs in `app/db/models.py`
 
 ### Table tiers
@@ -757,6 +793,7 @@ V2 will also unlock sales-action labels (`aranacak`, `arandi`, etc.) via NetGSM/
 | `ilgili_otel`, `ilgili_otel_set_at`, `ilgili_otel_set_by` | Conflict-managed attribute |
 | `tasinma_tarihi`, `kayip_nedeni`, `oda_tiipi`, `butce` | Manual attributes (Gemini context) |
 | `pending_parent_university_id` | Campus escalation in progress |
+| `clarification_attempt` | Invalid campus reply retry counter (migration 014; reset on successful match) |
 | `reprompt_count`, `last_reprompt_sent_at` | Abandonment ladder |
 
 ### Entity relationships (simplified)
@@ -777,7 +814,7 @@ conversations → messages, rec_engine_logs, tag_assigner_runs, tag_assigner_que
 
 ## Migrations
 
-Migrations live in `migrations/` (001–013). **There is no automated migration runner** — apply manually via the Supabase SQL editor. Write migrations idempotently (`IF NOT EXISTS`) where possible.
+Migrations live in `migrations/` (001–014). **There is no automated migration runner** — apply manually via the Supabase SQL editor. Write migrations idempotently (`IF NOT EXISTS`) where possible.
 
 | # | File | Changes |
 |---|------|---------|
@@ -794,6 +831,7 @@ Migrations live in `migrations/` (001–013). **There is no automated migration 
 | 011 | `011_parent_university_escalation.sql` | Parent universities, campus maps, label maps |
 | 012 | `012_fix3_orphan_universities.sql` | Data fix: Doğuş Kadıköy, Arel cleanup |
 | 013 | `013_escalation_schema_fixes.sql` | `awaiting_campus_clarification` in CHECK; missed 011 fixes |
+| 014 | `014_phrase_gate_and_clarification.sql` | `clarification_attempt` column; `clarify_*` canned responses |
 
 ### External seed files (referenced, may not be in repo)
 
@@ -809,6 +847,7 @@ Apply separately in Supabase:
 - Migration 003 applied (GLOBAL-NULL-STATE exists and is wired)
 - Migration 006 applied (DEAL-AWAITING-STATE exists and is wired)
 - Migration 013 applied on production (confirms `awaiting_campus_clarification` constraint)
+- Migration 014 applied (`clarification_attempt` column; `clarify_uni`, `clarify_uni_name`, `clarify_campus_name` canned responses)
 
 ---
 
@@ -899,15 +938,16 @@ Auth: `api_access_token: CHATWOOT_API_TOKEN`, 10s timeout.
 
 | File | Covers |
 |------|--------|
-| `tests/test_matching.py` | University matching algorithm |
-| `tests/test_info_gatherer.py` | InfoGatherer state logic |
+| `tests/test_matching.py` | University matching algorithm, n-gram helpers, alias normalization |
+| `tests/test_phrase_gate.py` | Phrase gate filters and pre-conditions |
+| `tests/test_info_gatherer.py` | InfoGatherer extraction helpers (`_extract_university_candidate`, gender regex) |
 | `tests/test_security.py` | HMAC / secret verification |
 | `tests/test_testing_mode.py` | Phone allowlist behavior |
 | `tests/test_label_resolver.py` | TagAssigner label taxonomy |
 | `tests/test_conflict.py` | Option-A timestamp conflict rule |
 | `tests/test_payload_builder.py` | Gemini payload assembly |
 
-Integration tests requiring live Supabase are marked `@pytest.mark.integration` and excluded by default (`pytest.ini`: `-m "not integration"`).
+The `@pytest.mark.integration` marker is configured in `pytest.ini`, but **no integration tests are checked in yet** — `pytest -m integration` currently selects nothing.
 
 ### Pre-V1 audit suites
 
@@ -937,7 +977,8 @@ UPDATE conversations
 SET flow_state = NULL, university_id = NULL, gender = NULL,
     pending_parent_university_id = NULL, ilgili_otel = NULL,
     ilgili_otel_set_at = NULL, ilgili_otel_set_by = NULL,
-    auto_run_count = 0, manual_run_count = 0
+    auto_run_count = 0, manual_run_count = 0,
+    clarification_attempt = 0
 WHERE chatwoot_conversation_id = <your_test_cw_id>;
 ```
 
@@ -984,10 +1025,9 @@ Failure → fatal log, app refuses to start (unless bypassed).
 ### Staged go-live sequence
 
 1. Run Suites A & B; fix every finding
-2. Fix phrase gate and F6/F8 failures
-3. Re-run F-suite + conv-52 smoke test with `INTEGRITY_CHECK_BYPASS=off`
-4. Widen allowlist → monitor logs → `TESTING_LIMITATIONS_MODE=off`
-5. Monitor first week: RecEngine candidate logs, integrity sweep, TagAssigner error rate
+2. Implement matching-fixes spec (F6/F8); re-run F-suite + conv-52 smoke test with `INTEGRITY_CHECK_BYPASS=off`
+3. Widen allowlist → monitor logs → `TESTING_LIMITATIONS_MODE=off`
+4. Monitor first week: RecEngine candidate logs, integrity sweep, TagAssigner error rate
 
 ---
 
@@ -997,13 +1037,13 @@ See `docs/v1-audit.md` for the full audit. Summary of blockers before turning of
 
 ### Must complete
 
-- [ ] F6 pass — `taşkışla` → İTÜ Maçka direct (no escalation)
-- [ ] Phrase gate decision implemented — natural openers get visible bot response
-- [ ] F8 — invalid campus reply has user-visible behavior
+- [ ] F6 pass — `taşkışla` → İTÜ Maçka direct (no escalation); see [`docs/matching-fixes-impl-spec.md`](docs/matching-fixes-impl-spec.md)
+- [x] Phrase gate implemented — multi-filter gate in `phrase_gate.py` (natural greetings/housing/proximity pass)
+- [ ] F8 — invalid campus/university second-failure behavior finalized (matching-fixes spec: silent `human_needed` on second invalid university reply)
 - [ ] Suite A (A1–A11) — zero rows on every check
 - [ ] Suite A12 — intended hotel at rank 1 for high-traffic campuses
 - [ ] Suite B — alias collision check exits 0
-- [ ] Migration 013 applied on production DB
+- [ ] Migrations 013 and 014 applied on production DB
 - [ ] `INTEGRITY_CHECK_BYPASS=off` — clean boot
 - [ ] `deal_awaiting_msg` copy finalized
 
@@ -1018,24 +1058,24 @@ See `docs/v1-audit.md` for the full audit. Summary of blockers before turning of
 
 ## Known Issues & Open Decisions
 
-### Phrase gate (highest-volume production risk)
+### Phrase gate — first unmatched opener (residual risk)
 
-Current gate requires exact substrings including punctuation (`"Merhaba!"` not `"merhaba"`). Natural Turkish greetings fail silently to `human_needed` with no outbound message. 11 of 10 live test scenarios hit this on step 1.
+The multi-filter phrase gate (`app/layers/phrase_gate.py`) now accepts natural Turkish greetings, housing/proximity intent, widget templates, and entity n-grams on the **first inbound message**. F-suite step-1 failures from the July 2026 test run were addressed by this module.
 
-**Options:** extend gate, two-tier gate (soft opener → `hangi`), accept any first message, or keep strict gate with 100% pre-filled link traffic guarantee.
+**Residual risk:** If the first message matches **no** filter and is not a hotel n-gram match, the gate returns `IGNORE` — the conversation stays in `new` with **no outbound message** and no escalation. This is intentional (not `human_needed`) but can look like a broken bot to leads who open with unstructured text.
 
 ### Silent `human_needed`
 
-`_escalate_human_needed` updates DB only — no Chatwoot message. Affects phrase gate failures, gender/university parse failures, invalid campus replies (F8), and post-completion free text. Leads see silence; sales may not notice.
+`_escalate_human_needed` updates DB only — no Chatwoot message. Affects: second invalid campus reply, gender parse failures, post-completion free text, and (after matching-fixes) second invalid university reply. First invalid campus/university replies **do** send outbound clarification canned responses (migration 014).
 
 ### Open product decisions
 
 | Item | Question |
 |------|----------|
 | RecEngine geography (F3) | Should `hotel_accessible_universities` be narrowed? Should `priority_score` encode district proximity? |
-| Invalid campus reply (F8) | Re-ask, human handoff with message, or defer to FallBack? |
+| Out-of-Istanbul vs silent handoff | Today, second invalid university reply sends `istanbul` canned + `completed`. Matching-fixes spec changes this to silent `human_needed`. Confirm before implementing. |
 | Out-of-Istanbul (F10) | Same path for nonsense vs real out-of-area universities — acceptable? |
-| Campus ordering | Add `ORDER BY campus_label` for consistent escalation question order? |
+| National university list | Deferred — see Fix 5 in `docs/matching-fixes-impl-spec.md` |
 
 ### Engineering gaps (not all V1 blockers)
 
@@ -1051,7 +1091,7 @@ Current gate requires exact substrings including punctuation (`"Merhaba!"` not `
 
 ### F6 — campus alias `taşkışla`
 
-Should resolve directly to İTÜ Maçka without escalation. Currently fails — root cause needs engineering investigation (DB seed, normalization, or match tier).
+Should resolve directly to İTÜ Maçka without escalation when typed as a university reply (`awaiting_university`), and via campus alias lookup when typed during campus clarification. Tier-2 alias matching with diacritic normalization is implemented in `matching.py`; campus-clarification alias lookup is specced in [`docs/matching-fixes-impl-spec.md`](docs/matching-fixes-impl-spec.md). Re-verify against live DB after that pass.
 
 ---
 
@@ -1065,6 +1105,8 @@ Should resolve directly to İTÜ Maçka without escalation. Currently fails — 
 | [`docs/tagassigner-phase-plan.md`](docs/tagassigner-phase-plan.md) | Phase-by-phase implementation plan with exit criteria |
 | [`docs/v0-amendment-deal-awaiting.md`](docs/v0-amendment-deal-awaiting.md) | `deal_awaiting` flow amendment to InfoGatherer |
 | [`docs/v1-audit.md`](docs/v1-audit.md) | Production readiness audit — failures, decisions, checklist |
+| [`docs/chatbot-phrase-gate-and-matching-spec.md`](docs/chatbot-phrase-gate-and-matching-spec.md) | Phrase gate, clarification flows, matching normalization |
+| [`docs/matching-fixes-impl-spec.md`](docs/matching-fixes-impl-spec.md) | Pending matching/clarification fixes (F6, F8, dynamic Levenshtein) |
 | [`docs/wa_test_links.md`](docs/wa_test_links.md) | WhatsApp functional test links F1–F10 with annotations |
 | [`docs/test_plan_flags_1_and_2.md`](docs/test_plan_flags_1_and_2.md) | Suite A/B/F definitions and exit criteria |
 | [`docs/test-and-fix-1.md`](docs/test-and-fix-1.md) | Conv-52 root-cause analysis and fix list |

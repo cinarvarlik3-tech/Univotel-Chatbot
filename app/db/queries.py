@@ -124,6 +124,54 @@ async def set_conversation_stopped(conversation_id: uuid.UUID) -> None:
     )
 
 
+async def is_first_inbound_message(
+    conversation_id: uuid.UUID,
+    chatwoot_message_id: int,
+) -> bool:
+    """
+    True when this inbound message has the lowest chatwoot_message_id for the conversation.
+    Used for phrase-gate pre-condition A.
+    """
+    pool = get_pool()
+    row = await pool.fetchrow(
+        """
+        SELECT (
+            SELECT MIN(m.chatwoot_message_id)
+            FROM messages m
+            WHERE m.conversation_id = $1
+              AND m.message_type = 'inbound'
+        ) = $2 AS is_first
+        """,
+        conversation_id,
+        chatwoot_message_id,
+    )
+    return bool(row and row["is_first"])
+
+
+async def reset_clarification_attempt(conversation_id: uuid.UUID) -> None:
+    pool = get_pool()
+    await pool.execute(
+        """
+        UPDATE conversations
+        SET clarification_attempt = 0, last_updated_at = now()
+        WHERE id = $1
+        """,
+        conversation_id,
+    )
+
+
+async def increment_clarification_attempt(conversation_id: uuid.UUID) -> None:
+    pool = get_pool()
+    await pool.execute(
+        """
+        UPDATE conversations
+        SET clarification_attempt = clarification_attempt + 1, last_updated_at = now()
+        WHERE id = $1
+        """,
+        conversation_id,
+    )
+
+
 async def increment_reprompt_count(conversation_id: uuid.UUID) -> None:
     pool = get_pool()
     await pool.execute(

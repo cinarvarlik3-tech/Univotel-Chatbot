@@ -41,11 +41,15 @@ class RecResult:
 async def run_rec_engine(
     conversation_id: uuid.UUID,
     idempotency_key: uuid.UUID,
+    university_id_override: uuid.UUID | None = None,
+    gender_override: str | None = None,
 ) -> None:
     """
     Full RecEngine run. The idempotency_key prevents duplicate processing:
     write 'processing' first, then work. A retry that arrives mid-run
     finds the existing row and no-ops.
+
+    Optional overrides are runtime-only — DB is not written before the run.
     """
     # Idempotency: write processing row before any query work
     await queries.insert_rec_engine_processing(conversation_id, idempotency_key)
@@ -57,7 +61,11 @@ async def run_rec_engine(
         return
 
     try:
-        result = await _select_hotel(conversation_id)
+        result = await _select_hotel(
+            conversation_id,
+            university_id_override=university_id_override,
+            gender_override=gender_override,
+        )
     except Exception as exc:
         logger.error("RecEngine: unexpected error for conversation %s: %s", conversation_id, exc)
         await queries.update_rec_engine_log(idempotency_key, "failed", None, status_code="502")
@@ -79,19 +87,25 @@ async def run_rec_engine(
     await _fire_callback(conversation_id, hotel_rec, result.status)
 
 
-async def _select_hotel(conversation_id: uuid.UUID) -> RecResult:
+async def _select_hotel(
+    conversation_id: uuid.UUID,
+    university_id_override: uuid.UUID | None = None,
+    gender_override: str | None = None,
+) -> RecResult:
     conv = await queries.get_conversation_by_chatwoot_id_by_id(conversation_id)
-    if not conv or not conv.university_id or not conv.gender:
+    university_id = university_id_override or (conv.university_id if conv else None)
+    gender = gender_override or (conv.gender if conv else None)
+    if not university_id or not gender:
         raise ValueError(f"Missing university_id or gender for conversation {conversation_id}")
 
     candidates = await queries.find_hotels_by_gender_and_university(
-        conv.gender, conv.university_id
+        gender, university_id
     )
 
     if not candidates:
         logger.info(
             "RecEngine: conv=%s uni=%s gender=%s candidates=[] → NOT_FOUND",
-            conversation_id, conv.university_id, conv.gender,
+            conversation_id, university_id, gender,
         )
         return RecResult(status=RecStatus.NOT_FOUND, hotel_id=GLOBAL_NULL_STATE_ID)
 
@@ -103,8 +117,8 @@ async def _select_hotel(conversation_id: uuid.UUID) -> RecResult:
     logger.info(
         "RecEngine: conv=%s uni=%s gender=%s candidates=%s → selected=%s",
         conversation_id,
-        conv.university_id,
-        conv.gender,
+        university_id,
+        gender,
         [(h.name, h.priority_score) for h in candidates],
         hotel.name,
     )
@@ -114,7 +128,7 @@ async def _select_hotel(conversation_id: uuid.UUID) -> RecResult:
     if not live:
         logger.warning("RecEngine: hotel %s no longer exists — rerunning selection", hotel.id)
         fresh_candidates = await queries.find_hotels_by_gender_and_university(
-            conv.gender, conv.university_id
+            gender, university_id
         )
         fresh_candidates = [c for c in fresh_candidates if c.id != hotel.id]
         if not fresh_candidates:

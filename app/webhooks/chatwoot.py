@@ -226,6 +226,7 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks):
             conversation_id=conversation.id,
             chatwoot_conversation_id=chatwoot_conversation_id,
             content=content or "",
+            chatwoot_message_id=chatwoot_message_id,
         )
 
     return JSONResponse(status_code=200, content={"status": "ok"})
@@ -235,6 +236,7 @@ async def _process_inbound(
     conversation_id,
     chatwoot_conversation_id: int,
     content: str,
+    chatwoot_message_id: int | None = None,
 ) -> None:
     from app.layers.info_gatherer import process_message
 
@@ -244,7 +246,12 @@ async def _process_inbound(
         return
 
     try:
-        await process_message(conversation, chatwoot_conversation_id, content)
+        await process_message(
+            conversation,
+            chatwoot_conversation_id,
+            content,
+            chatwoot_message_id=chatwoot_message_id,
+        )
     except Exception as exc:
         logger.error(
             "WEBHOOK bg: unhandled error in process_message for conversation %s: %s",

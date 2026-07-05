@@ -13,22 +13,17 @@ from typing import Optional
 
 from app.db import queries
 from app.db.models import ChatbotLog, Conversation
-from app.layers.matching import MatchConfidence, match_university
+from app.layers.matching import (
+    MatchConfidence,
+    match_hotel_by_ngram,
+    match_university,
+    scan_entities_by_ngram,
+    word_count_after_normalize,
+)
+from app.layers.phrase_gate import PhraseGateAction, evaluate_phrase_gate
 from app.background.send_retry import send_with_retry
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-PHRASE_GATE = [
-    "Üniversitem:",
-    "Merhaba!",
-    "My University:",
-    "Hello!",
-    "Başvuru Kodu:",
-]
 
 UNIVERSITY_KEYWORDS = re.compile(
     r"(Üniversitesi|Universitesi|Üni|uni\b)",
@@ -42,10 +37,11 @@ CANNED_HANGI = "hangi"
 CANNED_KIZ_ERKEK = "kiz-erkek"
 CANNED_ISTANBUL = "istanbul"
 CANNED_CLARIFY = "clarify_uni"
+CANNED_CLARIFY_UNI_NAME = "clarify_uni_name"
+CANNED_CLARIFY_CAMPUS_NAME = "clarify_campus_name"
 
 LAYER = "infoGatherer"
 
-# Turkish vowel → question particle for vowel harmony (last-vowel rule)
 _VOWEL_SUFFIX: dict[str, str] = {
     'a': 'mı', 'A': 'mı', 'ı': 'mı', 'I': 'mı',
     'e': 'mi', 'E': 'mi', 'i': 'mi', 'İ': 'mi',
@@ -53,10 +49,6 @@ _VOWEL_SUFFIX: dict[str, str] = {
     'ö': 'mü', 'Ö': 'mü', 'ü': 'mü', 'Ü': 'mü',
 }
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 async def _send_canned(chatwoot_id: int, short_code: str) -> bool:
     cr = await queries.get_canned_response_by_short_code(short_code)
@@ -98,6 +90,41 @@ async def _send_hotel_responses(
             )
             return False
     return True
+
+
+async def _fire_hotel_path(
+    conversation: Conversation,
+    cwid: int,
+    hotel_id: uuid.UUID,
+) -> None:
+    """Direct hotel path — sends schemas and refreshes ilgili_otel without clearing uni/gender."""
+    cid = conversation.id
+    if conversation.flow_state != "completed":
+        advanced = await queries.update_conversation_state(
+            cid, "completed", conversation.flow_state
+        )
+        if not advanced:
+            return
+
+    await _send_hotel_responses(cid, cwid, hotel_id)
+
+    from app.tagassigner.attribute_resolver import write_attributes_at_flow_completion
+    await write_attributes_at_flow_completion(cid, cwid)
+
+
+async def _log_phrase_gate_ignore(conversation_id: uuid.UUID, reason: str) -> None:
+    logger.info(
+        "InfoGatherer: phrase gate ignored for conversation %s — %s",
+        conversation_id, reason,
+    )
+    await queries.write_log(ChatbotLog(
+        conversation_id=conversation_id,
+        operation_layer=LAYER,
+        which_run="contextRun",
+        log_level="info",
+        is_success=True,
+        explanation=f"Phrase gate ignored: {reason}",
+    ))
 
 
 async def _escalate_human_needed(
@@ -145,19 +172,31 @@ def _extract_university_candidate(text: str) -> Optional[str]:
     return None
 
 
+def _extract_gender(text: str) -> Optional[str]:
+    if GENDER_FEMALE.search(text):
+        return "female"
+    if GENDER_MALE.search(text):
+        return "male"
+    return None
+
+
+async def _resolve_university_from_greeting(content: str, all_unis, all_aliases):
+    candidate = _extract_university_candidate(content)
+    if candidate:
+        result = match_university(candidate, all_unis, all_aliases)
+        if result.confidence != MatchConfidence.NONE:
+            return result
+    return scan_entities_by_ngram(content, all_unis, all_aliases)
+
+
 def _turkish_question_suffix(word: str) -> str:
-    """Return the vowel-harmonised question particle (mı/mi/mu/mü) for a Turkish word."""
     for ch in reversed(word):
         if ch in _VOWEL_SUFFIX:
             return _VOWEL_SUFFIX[ch]
-    return "mı"  # fallback for words with no recognisable vowel
+    return "mı"
 
 
 async def _build_campus_question(parent_id: uuid.UUID) -> Optional[str]:
-    """
-    Assemble the parent university's escalation question with live campus options.
-    Returns None if the parent or its campuses cannot be fetched.
-    """
     parent = await queries.get_parent_university_by_id(parent_id)
     if not parent:
         logger.error("InfoGatherer: parent_university_id=%s not found", parent_id)
@@ -167,22 +206,18 @@ async def _build_campus_question(parent_id: uuid.UUID) -> Optional[str]:
         logger.error("InfoGatherer: no campus rows for parent_university_id=%s", parent_id)
         return None
     parts = [f"{c.campus_label} {_turkish_question_suffix(c.campus_label)}" for c in campuses]
-    campuses_str = ", ".join(parts)
-    return parent.question.format(name=parent.name, campuses=campuses_str)
+    return parent.question.format(name=parent.name, campuses=", ".join(parts))
 
 
 async def _write_deal_awaiting_label(chatwoot_id: int) -> None:
-    """
-    Push the 'deal_awaiting' label to Chatwoot.
-    Reads current labels first, adds 'deal_awaiting', then writes the full set.
-    This is a net-new Chatwoot write path (see V0 Amendment §4 and build brief #2).
-    """
     from app.chatwoot_client import get_labels, set_labels
-    from app.background.send_retry import SendRetryResult
 
     current = await get_labels(chatwoot_id)
     if current is None:
-        logger.error("InfoGatherer: could not fetch labels for conversation %d — skipping label write", chatwoot_id)
+        logger.error(
+            "InfoGatherer: could not fetch labels for conversation %d — skipping label write",
+            chatwoot_id,
+        )
         return
     if "deal_awaiting" not in current:
         result = await set_labels(chatwoot_id, current + ["deal_awaiting"])
@@ -198,11 +233,8 @@ async def _handle_post_match(
     cwid: int,
     university_id: uuid.UUID,
 ) -> None:
-    """
-    Common path after a successful university match.
-    Checks deal_awaiting membership; if member → terminal; else → awaiting_gender.
-    """
     cid = conversation.id
+    await queries.reset_clarification_attempt(cid)
 
     if await queries.is_deal_awaiting_university(university_id):
         advanced = await queries.update_conversation_state(cid, "completed", conversation.flow_state)
@@ -225,12 +257,8 @@ async def _handle_parent_match(
     cwid: int,
     parent_university_id: uuid.UUID,
 ) -> None:
-    """
-    Alias resolved to a parent university. If the parent has exactly one campus,
-    resolve directly. If it has multiple, send the escalation question and park
-    the conversation in awaiting_campus_clarification.
-    """
     cid = conversation.id
+    await queries.reset_clarification_attempt(cid)
     campuses = await queries.get_campuses_for_parent(parent_university_id)
 
     if len(campuses) == 1:
@@ -265,14 +293,39 @@ async def _handle_parent_match(
         )
 
 
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
+async def _route_university_match(
+    conversation: Conversation,
+    cwid: int,
+    result,
+) -> bool:
+    if result.confidence == MatchConfidence.NONE:
+        return False
+
+    if result.confidence == MatchConfidence.AMBIGUOUS:
+        advanced = await queries.update_conversation_state(
+            conversation.id, "awaiting_university_clarification", conversation.flow_state
+        )
+        if not advanced:
+            return True
+        await _send_canned(cwid, CANNED_CLARIFY)
+        return True
+
+    if result.parent_university_id:
+        await _handle_parent_match(conversation, cwid, result.parent_university_id)
+        return True
+
+    if result.university_id:
+        await _handle_post_match(conversation, cwid, result.university_id)
+        return True
+
+    return False
+
 
 async def process_message(
     conversation: Conversation,
     chatwoot_conversation_id: int,
     message_content: str,
+    chatwoot_message_id: Optional[int] = None,
 ) -> None:
     state = conversation.flow_state
     cid = conversation.id
@@ -313,69 +366,84 @@ async def process_message(
         await _handle_post_completion(conversation, cwid, content)
         return
 
-    await _handle_new(conversation, cwid, content)
+    await _handle_new(conversation, cwid, content, chatwoot_message_id)
 
-
-# ---------------------------------------------------------------------------
-# State handlers
-# ---------------------------------------------------------------------------
 
 async def _handle_new(
+    conversation: Conversation,
+    cwid: int,
+    content: str,
+    chatwoot_message_id: Optional[int],
+) -> None:
+    cid = conversation.id
+
+    if chatwoot_message_id is not None:
+        is_first = await queries.is_first_inbound_message(cid, chatwoot_message_id)
+    else:
+        is_first = conversation.flow_state == "new"
+
+    all_hotels = await queries.get_all_hotels()
+    all_unis = await queries.get_all_universities()
+    all_aliases = await queries.get_all_university_aliases()
+
+    gate = evaluate_phrase_gate(
+        content,
+        is_first_inbound=is_first,
+        hotels=all_hotels,
+        universities=all_unis,
+        aliases=all_aliases,
+    )
+
+    if gate.action == PhraseGateAction.IGNORE:
+        await _log_phrase_gate_ignore(cid, gate.reason)
+        return
+
+    if gate.action == PhraseGateAction.HOTEL_PATH and gate.matched_hotel is not None:
+        await _fire_hotel_path(conversation, cwid, gate.matched_hotel.id)
+        return
+
+    hotel = match_hotel_by_ngram(content, all_hotels)
+    if hotel is not None:
+        await _fire_hotel_path(conversation, cwid, hotel.id)
+        return
+
+    gender = _extract_gender(content)
+    if gender:
+        await queries.set_conversation_gender(cid, gender)
+
+    uni_result = await _resolve_university_from_greeting(content, all_unis, all_aliases)
+    if await _route_university_match(conversation, cwid, uni_result):
+        return
+
+    advanced = await queries.update_conversation_state(
+        cid, "awaiting_university", conversation.flow_state
+    )
+    if not advanced:
+        return
+    await _send_canned(cwid, CANNED_HANGI)
+
+
+async def _handle_university_no_match(
     conversation: Conversation,
     cwid: int,
     content: str,
 ) -> None:
     cid = conversation.id
 
-    if not any(phrase in content for phrase in PHRASE_GATE):
-        logger.info("InfoGatherer: phrase gate failed for conversation %s", cid)
-        await _escalate_human_needed(cid, "Phrase gate failed — no matching trigger phrase")
+    if conversation.flow_state == "awaiting_university_clarification":
+        advanced = await queries.update_conversation_state(cid, "completed", conversation.flow_state)
+        if not advanced:
+            return
+        await _send_canned(cwid, CANNED_ISTANBUL)
         return
 
-    all_hotels = await queries.get_all_hotels()
-    for hotel in all_hotels:
-        if hotel.name.lower() in content.lower():
-            advanced = await queries.update_conversation_state(cid, "completed", conversation.flow_state)
-            if not advanced:
-                return
-            await _send_hotel_responses(cid, cwid, hotel.id)
-            return
-
-    candidate = _extract_university_candidate(content)
-    if candidate:
-        all_unis = await queries.get_all_universities()
-        all_aliases = await queries.get_all_university_aliases()
-        result = match_university(candidate, all_unis, all_aliases)
-
-        if result.confidence == MatchConfidence.NONE:
-            if UNIVERSITY_KEYWORDS.search(content):
-                advanced = await queries.update_conversation_state(cid, "completed", conversation.flow_state)
-                if not advanced:
-                    return
-                await _send_canned(cwid, CANNED_ISTANBUL)
-                return
-
-        elif result.confidence == MatchConfidence.AMBIGUOUS:
-            advanced = await queries.update_conversation_state(
-                cid, "awaiting_university_clarification", conversation.flow_state
-            )
-            if not advanced:
-                return
-            await _send_canned(cwid, CANNED_CLARIFY)
-            return
-
-        elif result.parent_university_id:
-            await _handle_parent_match(conversation, cwid, result.parent_university_id)
-            return
-
-        elif result.university_id:
-            await _handle_post_match(conversation, cwid, result.university_id)
-            return
-
-    advanced = await queries.update_conversation_state(cid, "awaiting_university", conversation.flow_state)
-    if not advanced:
+    await _send_canned(cwid, CANNED_CLARIFY_UNI_NAME)
+    if word_count_after_normalize(content) <= 2:
         return
-    await _send_canned(cwid, CANNED_HANGI)
+
+    await queries.update_conversation_state(
+        cid, "awaiting_university_clarification", "awaiting_university"
+    )
 
 
 async def _handle_awaiting_university(
@@ -383,36 +451,15 @@ async def _handle_awaiting_university(
     cwid: int,
     content: str,
 ) -> None:
-    cid = conversation.id
     all_unis = await queries.get_all_universities()
     all_aliases = await queries.get_all_university_aliases()
     result = match_university(content, all_unis, all_aliases)
 
     if result.confidence == MatchConfidence.NONE:
-        if UNIVERSITY_KEYWORDS.search(content):
-            advanced = await queries.update_conversation_state(cid, "completed", conversation.flow_state)
-            if not advanced:
-                return
-            await _send_canned(cwid, CANNED_ISTANBUL)
-            return
-        await _escalate_human_needed(cid, "University reply did not match any known university")
+        await _handle_university_no_match(conversation, cwid, content)
         return
 
-    if result.confidence == MatchConfidence.AMBIGUOUS:
-        advanced = await queries.update_conversation_state(
-            cid, "awaiting_university_clarification", conversation.flow_state
-        )
-        if not advanced:
-            return
-        await _send_canned(cwid, CANNED_CLARIFY)
-        return
-
-    if result.parent_university_id:
-        await _handle_parent_match(conversation, cwid, result.parent_university_id)
-        return
-
-    if result.university_id:
-        await _handle_post_match(conversation, cwid, result.university_id)
+    await _route_university_match(conversation, cwid, result)
 
 
 async def _handle_clarification(
@@ -426,10 +473,10 @@ async def _handle_clarification(
     result = match_university(content, all_unis, all_aliases)
 
     if result.confidence in (MatchConfidence.NONE, MatchConfidence.AMBIGUOUS):
-        await _escalate_human_needed(
-            cid,
-            "University clarification reply still ambiguous or unmatched — one attempt exhausted",
-        )
+        advanced = await queries.update_conversation_state(cid, "completed", conversation.flow_state)
+        if not advanced:
+            return
+        await _send_canned(cwid, CANNED_ISTANBUL)
         return
 
     if result.parent_university_id:
@@ -445,10 +492,6 @@ async def _handle_awaiting_campus_clarification(
     cwid: int,
     content: str,
 ) -> None:
-    """
-    The lead replied to a campus escalation question (e.g. "Maçka mı, Ayazağa mı?").
-    Match the reply against the pending parent's campus list.
-    """
     from app.layers.matching import normalize
 
     cid = conversation.id
@@ -463,9 +506,7 @@ async def _handle_awaiting_campus_clarification(
 
     campuses = await queries.get_campuses_for_parent(parent_id)
     if not campuses:
-        await _escalate_human_needed(
-            cid, f"No campus rows for pending parent {parent_id}"
-        )
+        await _escalate_human_needed(cid, f"No campus rows for pending parent {parent_id}")
         return
 
     normalized_reply = normalize(content)
@@ -476,13 +517,18 @@ async def _handle_awaiting_campus_clarification(
             break
 
     if not matched:
-        await _escalate_human_needed(
-            cid,
-            f"Campus clarification reply '{content[:80]}' did not match any campus label — escalating to human",
-        )
+        if conversation.clarification_attempt >= 1:
+            await _escalate_human_needed(
+                cid,
+                f"Campus clarification reply '{content[:80]}' failed twice — FallBack stub",
+            )
+            return
+        await queries.increment_clarification_attempt(cid)
+        await _send_canned(cwid, CANNED_CLARIFY_CAMPUS_NAME)
         return
 
     await queries.set_conversation_pending_parent(cid, None)
+    await queries.reset_clarification_attempt(cid)
     await _handle_post_match(conversation, cwid, matched.university_id)
 
 
@@ -531,10 +577,10 @@ async def _handle_post_completion(
 ) -> None:
     cid = conversation.id
     all_hotels = await queries.get_all_hotels()
-    for hotel in all_hotels:
-        if hotel.name.lower() in content.lower():
-            await _send_hotel_responses(cid, cwid, hotel.id)
-            return
+    hotel = match_hotel_by_ngram(content, all_hotels)
+    if hotel is not None:
+        await _fire_hotel_path(conversation, cwid, hotel.id)
+        return
     await _escalate_human_needed(
         cid,
         "Post-completion message did not name a specific hotel — deferred to human",

@@ -6,8 +6,11 @@ from app.layers.matching import (
     MatchConfidence,
     normalize,
     match_university,
+    match_hotel_by_ngram,
+    scan_entities_by_ngram,
+    word_count_after_normalize,
 )
-from app.db.models import University, UniversityAlias
+from app.db.models import University, UniversityAlias, Hotel
 
 
 def _uni(name: str, short_name: str | None = None) -> University:
@@ -16,6 +19,57 @@ def _uni(name: str, short_name: str | None = None) -> University:
 
 def _alias(university_id: uuid.UUID, alias: str) -> UniversityAlias:
     return UniversityAlias(id=uuid.uuid4(), university_id=university_id, alias=alias)
+
+
+def test_alias_normalization_diacritic():
+    macaka_id = uuid.uuid4()
+    uni = _uni("İstanbul Teknik Üniversitesi - Maçka Kampüsü")
+    aliases = [UniversityAlias(id=uuid.uuid4(), university_id=macaka_id, alias="taşkışla")]
+    result = match_university("taşkışla", [uni], aliases)
+    assert result.confidence == MatchConfidence.ALIAS
+    assert result.university_id == macaka_id
+
+
+def test_alias_normalization_stored_diacritic():
+    macaka_id = uuid.uuid4()
+    uni = _uni("İstanbul Teknik Üniversitesi - Maçka Kampüsü")
+    aliases = [UniversityAlias(id=uuid.uuid4(), university_id=macaka_id, alias="taşkışla")]
+    result = match_university("taskisla", [uni], aliases)
+    assert result.confidence == MatchConfidence.ALIAS
+    assert result.university_id == macaka_id
+
+
+def test_beykent_ayazaga_diacritic_alias():
+    campus_id = uuid.uuid4()
+    uni = _uni("Beykent Üniversitesi - Ayazağa Kampüsü")
+    aliases = [UniversityAlias(id=uuid.uuid4(), university_id=campus_id, alias="beykent ayazağa")]
+    result = match_university("beykent ayazağa", [uni], aliases)
+    assert result.confidence == MatchConfidence.ALIAS
+    assert result.university_id == campus_id
+
+
+def test_scan_entities_longest_first():
+    itu = _uni("İstanbul Teknik Üniversitesi")
+    istanbul = _uni("İstanbul Üniversitesi")
+    result = scan_entities_by_ngram(
+        "İstanbul Teknik Üniversitesi öğrencisiyim",
+        [itu, istanbul],
+        [],
+    )
+    assert result.confidence == MatchConfidence.EXACT
+    assert result.university_id == itu.id
+
+
+def test_match_hotel_by_ngram_typo():
+    hotel = Hotel(id=uuid.uuid4(), name="Academia Vadi", is_visible=True)
+    matched = match_hotel_by_ngram("Academia Vadi yurt", [hotel])
+    assert matched is not None
+    assert matched.id == hotel.id
+
+
+def test_word_count_after_normalize():
+    assert word_count_after_normalize("  boğaziçi  ") == 1
+    assert word_count_after_normalize("istanbul teknik") == 2
 
 
 # ---------------------------------------------------------------------------
