@@ -15,9 +15,22 @@ from typing import Iterator, Optional
 from rapidfuzz.distance import Levenshtein as _Lev
 levenshtein_distance = _Lev.distance
 
-from app.db.models import Hotel, University, UniversityAlias
+from app.db.models import Hotel, OutOfCityUniversity, University, UniversityAlias
 
-LEVENSHTEIN_CUTOFF = 2
+LEVENSHTEIN_CUTOFF = 2  # legacy reference; comparisons use _get_levenshtein_cutoff()
+
+
+def _get_levenshtein_cutoff(normalized: str) -> int:
+    """Length-based Levenshtein tolerance — short inputs disable fuzzy Tier 3."""
+    length = len(normalized)
+    if length <= 3:
+        return 0
+    if length <= 5:
+        return 1
+    if length <= 7:
+        return 2
+    return 3
+
 
 _SUFFIXES = [
     "üniversitesi", "universitesi", "university", "uni", "üni",
@@ -111,12 +124,13 @@ def match_university(
         if normalize(alias.alias) == normalized and alias.university_id:
             return MatchResult(confidence=MatchConfidence.ALIAS, university_id=alias.university_id)
 
-    # Tier 3 — Levenshtein ≤ CUTOFF
+    # Tier 3 — Levenshtein ≤ dynamic cutoff
+    cutoff = _get_levenshtein_cutoff(normalized)
     hits: list[tuple[int, uuid.UUID]] = []
     for uni in universities:
         norm_name = normalize(uni.name)
         dist = levenshtein_distance(normalized, norm_name)
-        if dist <= LEVENSHTEIN_CUTOFF:
+        if dist <= cutoff:
             hits.append((dist, uni.id))
 
     if not hits:
@@ -129,6 +143,45 @@ def match_university(
         return MatchResult(confidence=MatchConfidence.LEVENSHTEIN, university_id=closest[0])
 
     return MatchResult(confidence=MatchConfidence.AMBIGUOUS)
+
+
+def match_out_of_city(
+    raw_text: str,
+    out_of_city_unis: list[OutOfCityUniversity],
+) -> Optional[OutOfCityUniversity]:
+    """
+    Scan out_of_city_universities by name and short_name.
+    Returns the first matching university, or None.
+    Called only after match_university() returns NONE.
+    """
+    normalized = normalize(raw_text)
+    if not normalized:
+        return None
+
+    cutoff = _get_levenshtein_cutoff(normalized)
+
+    for uni in out_of_city_unis:
+        if normalize(uni.name) == normalized:
+            return uni
+        if uni.short_name and normalize(uni.short_name) == normalized:
+            return uni
+
+    if cutoff > 0:
+        hits: list[tuple[int, OutOfCityUniversity]] = []
+        for uni in out_of_city_unis:
+            dist = levenshtein_distance(normalized, normalize(uni.name))
+            if dist <= cutoff:
+                hits.append((dist, uni))
+            if uni.short_name:
+                dist_short = levenshtein_distance(normalized, normalize(uni.short_name))
+                if dist_short <= cutoff:
+                    hits.append((dist_short, uni))
+
+        if hits:
+            hits.sort(key=lambda x: x[0])
+            return hits[0][1]
+
+    return None
 
 
 def scan_entities_by_ngram(
@@ -163,7 +216,7 @@ def match_hotel_by_ngram(text: str, hotels: list[Hotel]) -> Optional[Hotel]:
                 continue
             if normalized_candidate == normalized_name:
                 return hotel
-            if levenshtein_distance(normalized_candidate, normalized_name) <= LEVENSHTEIN_CUTOFF:
+            if levenshtein_distance(normalized_candidate, normalized_name) <= _get_levenshtein_cutoff(normalized_candidate):
                 return hotel
     return None
 

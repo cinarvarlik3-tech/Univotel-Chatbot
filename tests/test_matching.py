@@ -6,11 +6,13 @@ from app.layers.matching import (
     MatchConfidence,
     normalize,
     match_university,
+    match_out_of_city,
     match_hotel_by_ngram,
     scan_entities_by_ngram,
     word_count_after_normalize,
+    _get_levenshtein_cutoff,
 )
-from app.db.models import University, UniversityAlias, Hotel
+from app.db.models import University, UniversityAlias, Hotel, OutOfCityUniversity
 
 
 def _uni(name: str, short_name: str | None = None) -> University:
@@ -19,6 +21,15 @@ def _uni(name: str, short_name: str | None = None) -> University:
 
 def _alias(university_id: uuid.UUID, alias: str) -> UniversityAlias:
     return UniversityAlias(id=uuid.uuid4(), university_id=university_id, alias=alias)
+
+
+def _ooc(name: str, short_name: str | None = None, city: str = "Ankara") -> OutOfCityUniversity:
+    return OutOfCityUniversity(
+        id=uuid.uuid4(),
+        name=name,
+        short_name=short_name,
+        city=city,
+    )
 
 
 def test_alias_normalization_diacritic():
@@ -185,4 +196,83 @@ def test_empty_input():
 def test_whitespace_input():
     unis = [_uni("Boğaziçi Üniversitesi")]
     result = match_university("   ", unis, [])
+    assert result.confidence == MatchConfidence.NONE
+
+
+# ---------------------------------------------------------------------------
+# Dynamic Levenshtein cutoff
+# ---------------------------------------------------------------------------
+
+def test_get_levenshtein_cutoff_boundaries():
+    assert _get_levenshtein_cutoff("abc") == 0
+    assert _get_levenshtein_cutoff("abcd") == 1
+    assert _get_levenshtein_cutoff("abcde") == 1
+    assert _get_levenshtein_cutoff("abcdef") == 2
+    assert _get_levenshtein_cutoff("abcdefg") == 2
+    assert _get_levenshtein_cutoff("abcdefgh") == 3
+
+
+def test_match_out_of_city_exact_name():
+    unis = [_ooc("Hacettepe Üniversitesi", short_name="HÜ")]
+    matched = match_out_of_city("Hacettepe Üniversitesi", unis)
+    assert matched is not None
+    assert matched.name == "Hacettepe Üniversitesi"
+
+
+def test_match_out_of_city_exact_short_name():
+    unis = [_ooc("Orta Doğu Teknik Üniversitesi", short_name="ODTÜ")]
+    matched = match_out_of_city("ODTÜ", unis)
+    assert matched is not None
+    assert matched.short_name == "ODTÜ"
+
+
+def test_match_out_of_city_levenshtein_typo():
+    unis = [_ooc("Hacettepe Üniversitesi", short_name="HÜ")]
+    matched = match_out_of_city("Hasettepe Universitesi", unis)
+    assert matched is not None
+    assert matched.name == "Hacettepe Üniversitesi"
+
+
+def test_match_out_of_city_short_input_no_fuzzy():
+    unis = [_ooc("Hacettepe Üniversitesi", short_name="HÜ")]
+    assert match_out_of_city("XYZ", unis) is None
+
+
+def test_match_out_of_city_empty_input():
+    unis = [_ooc("Hacettepe Üniversitesi")]
+    assert match_out_of_city("", unis) is None
+    assert match_out_of_city("   ", unis) is None
+
+
+def test_match_out_of_city_closest_on_tie():
+    unis = [
+        _ooc("Anadolu Üniversitesi", city="Eskişehir"),
+        _ooc("Anadol Üniversitesi", city="Eskişehir"),
+    ]
+    matched = match_out_of_city("anadolu", unis)
+    assert matched is not None
+    assert matched.name == "Anadolu Üniversitesi"
+
+
+def test_tou_does_not_levenshtein_match_koc():
+    koc_id = uuid.uuid4()
+    unis = [_uni("Koç Üniversitesi", short_name="KU")]
+    result = match_university("TÖÜ", unis, [])
+    assert result.confidence == MatchConfidence.NONE, (
+        "TÖÜ normalizes to 'tou' (3 chars); must not fuzzy-match Koç short name 'ku'"
+    )
+
+
+def test_short_valid_alias_ku_still_matches():
+    koc_id = uuid.uuid4()
+    unis = [University(id=koc_id, name="Koç Üniversitesi", university_short_name="KU")]
+    aliases = [_alias(koc_id, "ku")]
+    result = match_university("ku", unis, aliases)
+    assert result.confidence in (MatchConfidence.EXACT, MatchConfidence.ALIAS)
+    assert result.university_id == koc_id
+
+
+def test_length_3_input_no_fuzzy_tier3():
+    unis = [_uni("Boğaziçi Üniversitesi")]
+    result = match_university("xyz", unis, [])
     assert result.confidence == MatchConfidence.NONE

@@ -11,7 +11,7 @@ from typing import Optional
 
 from app.db.client import get_pool
 from app.db.models import (
-    Conversation, Hotel, University, UniversityAlias,
+    Conversation, Hotel, University, OutOfCityUniversity, UniversityAlias,
     CannedResponse, ResponseSchema, RecEngineLog, ChatbotLog,
     HotelChatwootLabelMap, UniversityChatwootLabelMap,
     ParentUniversity, UniversityParentMap,
@@ -549,6 +549,20 @@ async def get_all_university_aliases() -> list[UniversityAlias]:
         "SELECT id, university_id, alias, parent_university_id FROM university_aliases"
     )
     return [UniversityAlias(**dict(r)) for r in rows]
+
+
+async def get_all_out_of_city_universities() -> list[OutOfCityUniversity]:
+    pool = get_pool()
+    rows = await pool.fetch(
+        "SELECT id, name, short_name, city FROM out_of_city_universities"
+    )
+    return [OutOfCityUniversity(**dict(r)) for r in rows]
+
+
+async def get_out_of_city_university_count() -> int:
+    pool = get_pool()
+    row = await pool.fetchrow("SELECT count(*) AS n FROM out_of_city_universities")
+    return int(row["n"]) if row else 0
 
 
 async def get_university_by_id(university_id: uuid.UUID) -> Optional[University]:

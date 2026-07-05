@@ -19,6 +19,13 @@ class University(BaseModel):
     university_short_name: Optional[str] = None
 
 
+class OutOfCityUniversity(BaseModel):
+    id: uuid.UUID
+    name: str
+    short_name: Optional[str] = None
+    city: str
+
+
 class UniversityAlias(BaseModel):
     id: uuid.UUID
     alias: str

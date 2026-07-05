@@ -426,7 +426,7 @@ InfoGatherer is a **finite state machine** with optimistic locking via `update_c
 
 **Step 5 — Direct ask.** Send canned `hangi`, state → `awaiting_university`.
 
-**Ambiguous match (Levenshtein tie):** Send `clarify_uni` canned ("Tam ismi neydi efendim üniversitenizin, kısaltmadan çıkaramadım?"), state → `awaiting_university_clarification`. One clarification round — still ambiguous or no-match → out-of-Istanbul canned (`istanbul`), state → `completed`.
+**Ambiguous match (Levenshtein tie):** Send `clarify_uni` canned ("Tam ismi neydi efendim üniversitenizin, kısaltmadan çıkaramadım?"), state → `awaiting_university_clarification`. One clarification round — still ambiguous or no-match → silent `human_needed`.
 
 **Campus escalation:** Parent-level alias (e.g. `"itü"`, `"bau"`) → ask campus question from `parent_universities.question` template, state → `awaiting_campus_clarification`. If the parent has **only one campus**, skip the question and resolve directly.
 
@@ -444,14 +444,14 @@ Once `university_id` and `gender` are confirmed → fire RecEngine (state → `r
 
 Requires migration **014** (`clarification_attempt` column + `clarify_*` canned responses).
 
-**University not matched** (`awaiting_university`):
+**University not matched** (`awaiting_university` or `awaiting_university_clarification`):
 
 | Attempt | Behavior |
 |---------|----------|
-| First | Send `clarify_uni_name` ("Efendim üniversite ismini çıkaramadım…"). If input is **> 2 words** after normalize, also advance to `awaiting_university_clarification`. If **≤ 2 words**, stay in `awaiting_university`. |
-| Second (in `awaiting_university_clarification`, or after a second short reply) | Send out-of-Istanbul canned (`istanbul`), state → `completed`. *Planned change:* silent `human_needed` for all second failures — see [`docs/matching-fixes-impl-spec.md`](docs/matching-fixes-impl-spec.md). |
+| First | Send `clarify_uni_name`, increment `clarification_attempt`. If input is **> 2 words** after normalize, also advance to `awaiting_university_clarification`. If **≤ 2 words**, stay in `awaiting_university`. |
+| Second (`clarification_attempt >= 1`, or any failure in `awaiting_university_clarification`) | Silent `_escalate_human_needed()` — DB write only, no Chatwoot message |
 
-**Levenshtein ambiguous tie** (any step): Send `clarify_uni`, state → `awaiting_university_clarification`. Second failure in that state → same out-of-Istanbul path as above (also slated for silent escalation in matching-fixes spec).
+**Levenshtein ambiguous tie** (any step): Send `clarify_uni`, state → `awaiting_university_clarification`. Second failure in that state → silent `human_needed`.
 
 **Campus not matched** (`awaiting_campus_clarification`):
 
@@ -460,7 +460,7 @@ Requires migration **014** (`clarification_attempt` column + `clarify_*` canned 
 | First | Send `clarify_campus_name`, increment `clarification_attempt`, stay in `awaiting_campus_clarification` |
 | Second (`clarification_attempt >= 1`) | Silent `_escalate_human_needed()` — DB write only, no Chatwoot message |
 
-`clarification_attempt` resets on any successful university or campus match. Campus matching currently compares `campus_label` only; alias lookup in this state is planned in matching-fixes spec (e.g. `taşkışla` after an İTÜ escalation question).
+`clarification_attempt` resets on any successful university or campus match. Campus matching compares `campus_label` and campus-scoped aliases from `university_aliases` (e.g. `taşkışla` → İTÜ Maçka during campus clarification).
 
 **Gender not matched** (`awaiting_gender`): Silent `human_needed`.
 
@@ -589,7 +589,7 @@ normalize(text)     # lowercase, strip Turkish diacritics, strip university suff
 
 **Parent alias hoisting:** Parent-level aliases (e.g. `"itü"`) are checked **before** Tier 1 exact match. This prevents a campus `short_name` collision from skipping campus escalation.
 
-**Levenshtein cutoff:** Fixed at 2 (`LEVENSHTEIN_CUTOFF`) for university Tier 3 and hotel n-gram matching. Dynamic length-based cutoff is specced in [`docs/matching-fixes-impl-spec.md`](docs/matching-fixes-impl-spec.md) but not yet implemented.
+**Levenshtein cutoff:** Length-based via `_get_levenshtein_cutoff()` — ≤3 chars: 0 (Tier 3 disabled); 4–5 chars: 1; ≥6 chars: 2. Prevents short-input false positives (e.g. `"TÖÜ"` → `"tou"` no longer fuzzy-matches Koç `"ku"`). `LEVENSHTEIN_CUTOFF = 2` remains as a legacy reference for `phrase_gate.py` widget matching.
 
 **N-gram helpers:** `tokenize()`, `scan_ngrams()`, `scan_entities_by_ngram()`, `match_hotel_by_ngram()`, and `word_count_after_normalize()` support phrase-gate entity detection, hotel-name paths, and invalid-input word-count logic.
 
@@ -941,6 +941,7 @@ Auth: `api_access_token: CHATWOOT_API_TOKEN`, 10s timeout.
 | `tests/test_matching.py` | University matching algorithm, n-gram helpers, alias normalization |
 | `tests/test_phrase_gate.py` | Phrase gate filters and pre-conditions |
 | `tests/test_info_gatherer.py` | InfoGatherer extraction helpers (`_extract_university_candidate`, gender regex) |
+| `tests/test_info_gatherer_handlers.py` | Invalid-input handlers (university/campus clarification, two-strike escalation) |
 | `tests/test_security.py` | HMAC / secret verification |
 | `tests/test_testing_mode.py` | Phone allowlist behavior |
 | `tests/test_label_resolver.py` | TagAssigner label taxonomy |
@@ -1037,9 +1038,9 @@ See `docs/v1-audit.md` for the full audit. Summary of blockers before turning of
 
 ### Must complete
 
-- [ ] F6 pass — `taşkışla` → İTÜ Maçka direct (no escalation); see [`docs/matching-fixes-impl-spec.md`](docs/matching-fixes-impl-spec.md)
+- [ ] F6 pass — `taşkışla` → İTÜ Maçka direct (re-verify live after matching fixes)
 - [x] Phrase gate implemented — multi-filter gate in `phrase_gate.py` (natural greetings/housing/proximity pass)
-- [ ] F8 — invalid campus/university second-failure behavior finalized (matching-fixes spec: silent `human_needed` on second invalid university reply)
+- [x] F8 — invalid campus/university two-strike behavior (clarify once, silent `human_needed` on second failure)
 - [ ] Suite A (A1–A11) — zero rows on every check
 - [ ] Suite A12 — intended hotel at rank 1 for high-traffic campuses
 - [ ] Suite B — alias collision check exits 0
@@ -1073,7 +1074,7 @@ The multi-filter phrase gate (`app/layers/phrase_gate.py`) now accepts natural T
 | Item | Question |
 |------|----------|
 | RecEngine geography (F3) | Should `hotel_accessible_universities` be narrowed? Should `priority_score` encode district proximity? |
-| Out-of-Istanbul vs silent handoff | Today, second invalid university reply sends `istanbul` canned + `completed`. Matching-fixes spec changes this to silent `human_needed`. Confirm before implementing. |
+| Out-of-Istanbul vs silent handoff | Second invalid university reply → silent `human_needed` (implemented). National-university list still deferred for F10. |
 | Out-of-Istanbul (F10) | Same path for nonsense vs real out-of-area universities — acceptable? |
 | National university list | Deferred — see Fix 5 in `docs/matching-fixes-impl-spec.md` |
 
@@ -1091,7 +1092,7 @@ The multi-filter phrase gate (`app/layers/phrase_gate.py`) now accepts natural T
 
 ### F6 — campus alias `taşkışla`
 
-Should resolve directly to İTÜ Maçka without escalation when typed as a university reply (`awaiting_university`), and via campus alias lookup when typed during campus clarification. Tier-2 alias matching with diacritic normalization is implemented in `matching.py`; campus-clarification alias lookup is specced in [`docs/matching-fixes-impl-spec.md`](docs/matching-fixes-impl-spec.md). Re-verify against live DB after that pass.
+Resolves via Tier-2 alias in `match_university()` (direct from `awaiting_university`) and via campus-scoped alias lookup in `awaiting_campus_clarification`. Re-verify against live DB with F-suite teardown between runs.
 
 ---
 

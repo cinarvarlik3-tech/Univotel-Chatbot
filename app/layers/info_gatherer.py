@@ -16,6 +16,7 @@ from app.db.models import ChatbotLog, Conversation
 from app.layers.matching import (
     MatchConfidence,
     match_hotel_by_ngram,
+    match_out_of_city,
     match_university,
     scan_entities_by_ngram,
     word_count_after_normalize,
@@ -423,6 +424,16 @@ async def _handle_new(
     await _send_canned(cwid, CANNED_HANGI)
 
 
+async def _fire_out_of_city(conversation: Conversation, cwid: int) -> None:
+    cid = conversation.id
+    advanced = await queries.update_conversation_state(
+        cid, "completed", conversation.flow_state
+    )
+    if not advanced:
+        return
+    await _send_canned(cwid, CANNED_ISTANBUL)
+
+
 async def _handle_university_no_match(
     conversation: Conversation,
     cwid: int,
@@ -430,20 +441,19 @@ async def _handle_university_no_match(
 ) -> None:
     cid = conversation.id
 
-    if conversation.flow_state == "awaiting_university_clarification":
-        advanced = await queries.update_conversation_state(cid, "completed", conversation.flow_state)
-        if not advanced:
-            return
-        await _send_canned(cwid, CANNED_ISTANBUL)
+    if conversation.clarification_attempt >= 1:
+        await _escalate_human_needed(
+            cid,
+            f"University clarification reply '{content[:80]}' failed twice — FallBack stub",
+        )
         return
 
     await _send_canned(cwid, CANNED_CLARIFY_UNI_NAME)
-    if word_count_after_normalize(content) <= 2:
-        return
-
-    await queries.update_conversation_state(
-        cid, "awaiting_university_clarification", "awaiting_university"
-    )
+    await queries.increment_clarification_attempt(cid)
+    if word_count_after_normalize(content) > 2:
+        await queries.update_conversation_state(
+            cid, "awaiting_university_clarification", "awaiting_university"
+        )
 
 
 async def _handle_awaiting_university(
@@ -456,6 +466,11 @@ async def _handle_awaiting_university(
     result = match_university(content, all_unis, all_aliases)
 
     if result.confidence == MatchConfidence.NONE:
+        all_ooc = await queries.get_all_out_of_city_universities()
+        ooc_match = match_out_of_city(content, all_ooc)
+        if ooc_match:
+            await _fire_out_of_city(conversation, cwid)
+            return
         await _handle_university_no_match(conversation, cwid, content)
         return
 
@@ -473,10 +488,15 @@ async def _handle_clarification(
     result = match_university(content, all_unis, all_aliases)
 
     if result.confidence in (MatchConfidence.NONE, MatchConfidence.AMBIGUOUS):
-        advanced = await queries.update_conversation_state(cid, "completed", conversation.flow_state)
-        if not advanced:
+        all_ooc = await queries.get_all_out_of_city_universities()
+        ooc_match = match_out_of_city(content, all_ooc)
+        if ooc_match:
+            await _fire_out_of_city(conversation, cwid)
             return
-        await _send_canned(cwid, CANNED_ISTANBUL)
+        await _escalate_human_needed(
+            cid,
+            f"University clarification reply '{content[:80]}' matched neither Istanbul nor out-of-city — FallBack stub",
+        )
         return
 
     if result.parent_university_id:
@@ -509,11 +529,22 @@ async def _handle_awaiting_campus_clarification(
         await _escalate_human_needed(cid, f"No campus rows for pending parent {parent_id}")
         return
 
+    all_aliases = await queries.get_all_university_aliases()
+
     normalized_reply = normalize(content)
     matched = None
     for campus in campuses:
         if normalize(campus.campus_label) == normalized_reply:
             matched = campus
+            break
+        campus_aliases = [
+            a for a in all_aliases if a.university_id == campus.university_id
+        ]
+        for alias in campus_aliases:
+            if normalize(alias.alias) == normalized_reply:
+                matched = campus
+                break
+        if matched:
             break
 
     if not matched:

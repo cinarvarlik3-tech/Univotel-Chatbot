@@ -108,6 +108,13 @@ async def run_integrity_check(fatal_on_failure: bool = True) -> bool:
         ok = False
 
     if ok:
+        ooc_count = await queries.get_out_of_city_university_count()
+        if ooc_count != 148:
+            logger.warning(
+                "INTEGRITY: out_of_city_universities has %d rows (expected 148) — "
+                "out-of-city matching may be incomplete",
+                ooc_count,
+            )
         logger.info("INTEGRITY: all checks passed")
     elif fatal_on_failure:
         raise RuntimeError(
