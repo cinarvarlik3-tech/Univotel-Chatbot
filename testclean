@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# testclean — run from repo root, e.g. ./testclean <uuid> [table]
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$DIR/venv/bin/python3" "$DIR/scripts/testclean.py" "$@"

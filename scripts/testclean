@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# testclean — wrapper around scripts/testclean.py, runs inside the project venv.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$DIR/venv/bin/python3" "$DIR/scripts/testclean.py" "$@"
