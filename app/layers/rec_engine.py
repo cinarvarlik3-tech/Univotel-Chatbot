@@ -20,7 +20,6 @@ from app.db.models import ChatbotLog
 
 logger = logging.getLogger(__name__)
 
-GLOBAL_NULL_STATE_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 LAYER = "recEngine"
 
 _CALLBACK_URL = "http://localhost:{port}/internal/infogatherer/callback"
@@ -36,6 +35,16 @@ class RecStatus(str, Enum):
 class RecResult:
     status: RecStatus
     hotel_id: Optional[uuid.UUID] = None
+
+
+async def _resolve_not_found_sentinel(university_id: uuid.UUID) -> uuid.UUID:
+    """
+    Pick the NOT_FOUND sentinel for an Istanbul university with no hotel match.
+    Membership in deal_awaiting_universities → label path (…0003); else …0002.
+    """
+    if await queries.is_deal_awaiting_university(university_id):
+        return queries.DEAL_AWAITING_LABEL_STATE_ID
+    return queries.DEAL_AWAITING_STATE_ID
 
 
 async def run_rec_engine(
@@ -81,7 +90,7 @@ async def run_rec_engine(
         ))
         return
 
-    hotel_rec = result.hotel_id if result.status == RecStatus.FOUND else None
+    hotel_rec = result.hotel_id if result.status != RecStatus.FAILED else None
     db_status = "success" if result.status != RecStatus.FAILED else "failed"
     await queries.update_rec_engine_log(idempotency_key, db_status, hotel_rec)
     await _fire_callback(conversation_id, hotel_rec, result.status)
@@ -103,11 +112,12 @@ async def _select_hotel(
     )
 
     if not candidates:
+        sentinel = await _resolve_not_found_sentinel(university_id)
         logger.info(
-            "RecEngine: conv=%s uni=%s gender=%s candidates=[] → NOT_FOUND",
-            conversation_id, university_id, gender,
+            "RecEngine: conv=%s uni=%s gender=%s candidates=[] → NOT_FOUND sentinel=%s",
+            conversation_id, university_id, gender, sentinel,
         )
-        return RecResult(status=RecStatus.NOT_FOUND, hotel_id=GLOBAL_NULL_STATE_ID)
+        return RecResult(status=RecStatus.NOT_FOUND, hotel_id=sentinel)
 
     if len(candidates) == 1:
         hotel = candidates[0]
@@ -132,7 +142,8 @@ async def _select_hotel(
         )
         fresh_candidates = [c for c in fresh_candidates if c.id != hotel.id]
         if not fresh_candidates:
-            return RecResult(status=RecStatus.NOT_FOUND, hotel_id=GLOBAL_NULL_STATE_ID)
+            sentinel = await _resolve_not_found_sentinel(university_id)
+            return RecResult(status=RecStatus.NOT_FOUND, hotel_id=sentinel)
         live = await queries.get_hotel_by_id(fresh_candidates[0].id)
         if not live:
             raise ValueError("Stale hotel rerun also produced a missing hotel — aborting")

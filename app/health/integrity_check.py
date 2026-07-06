@@ -5,7 +5,7 @@ Checks:
 1. Every visible hotel has >= 1 response_schemas row.
 2. Every response_schemas row points to a live canned_responses row and a live hotel.
 3. GLOBAL-NULL-STATE hotel exists and has its response_schemas wired.
-4. DEAL-AWAITING-STATE hotel exists and has its response_schemas wired.
+4. DEAL-AWAITING-STATE and DEAL-AWAITING-LABEL-STATE sentinels are wired.
 5. Every visible (recommendable) hotel has a hotel_chatwoot_label_map row.
 6. Every campus in university_parent_map has a university_chatwoot_label_map row.
 7. Every university has a university_parent_map row.
@@ -58,7 +58,15 @@ async def run_integrity_check(fatal_on_failure: bool = True) -> bool:
     if not deal_wired:
         logger.fatal(
             "INTEGRITY: DEAL-AWAITING-STATE hotel has no response_schemas row — "
-            "run migration 006 and confirm the 'deal_awaiting_msg' canned response is seeded"
+            "run migration 016 and wire the pending-deal canned response"
+        )
+        ok = False
+
+    deal_label_wired = await queries.deal_awaiting_label_state_is_wired()
+    if not deal_label_wired:
+        logger.fatal(
+            "INTEGRITY: DEAL-AWAITING-LABEL-STATE hotel has no response_schemas row — "
+            "run migration 016"
         )
         ok = False
 

@@ -82,13 +82,17 @@ async def rec_engine_callback(
     if body.status == "502":
         logger.error("CALLBACK: RecEngine returned 502 for conversation %s", body.conversation_id)
         await queries.set_conversation_human_needed(body.conversation_id)
+        from app.layers.info_gatherer import _write_human_needed_label
+        await _write_human_needed_label(conversation.chatwoot_conversation_id)
         return JSONResponse(status_code=200, content={"status": "escalated"})
 
-    hotel_id = body.hotel_rec
-    if not hotel_id:
-        # NOT_FOUND → GLOBAL-NULL-STATE
-        from app.db.queries import GLOBAL_NULL_STATE_ID
-        hotel_id = GLOBAL_NULL_STATE_ID
+    from app.db.queries import DEAL_AWAITING_LABEL_STATE_ID, GLOBAL_NULL_STATE_ID
+    from app.layers.info_gatherer import (
+        _send_hotel_responses,
+        _write_deal_awaiting_label,
+    )
+
+    hotel_id = body.hotel_rec or GLOBAL_NULL_STATE_ID
 
     # Advance state
     advanced = await queries.update_conversation_state(
@@ -98,10 +102,11 @@ async def rec_engine_callback(
         logger.info("CALLBACK: lost optimistic lock on conversation %s — skipping", body.conversation_id)
         return JSONResponse(status_code=200, content={"status": "lock_lost"})
 
-    # Send canned responses
-    from app.layers.info_gatherer import _send_hotel_responses
     chatwoot_id = conversation.chatwoot_conversation_id
     await _send_hotel_responses(body.conversation_id, chatwoot_id, hotel_id)
+
+    if hotel_id == DEAL_AWAITING_LABEL_STATE_ID:
+        await _write_deal_awaiting_label(chatwoot_id)
 
     # Write university / gender / ilgili_otel immediately so they are visible
     # in Chatwoot without waiting for the next TagAssigner run.

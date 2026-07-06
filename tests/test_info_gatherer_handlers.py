@@ -148,6 +148,31 @@ async def test_should_escalate_silently_on_second_invalid_university_clarificati
 
 
 @pytest.mark.asyncio
+async def test_should_write_human_needed_label_on_escalate():
+    conv = _conversation(flow_state="awaiting_university", clarification_attempt=1)
+
+    with patch.object(info_gatherer.queries, "write_log", new_callable=AsyncMock), \
+         patch.object(info_gatherer.queries, "set_conversation_human_needed", new_callable=AsyncMock) as set_state, \
+         patch.object(info_gatherer, "_write_human_needed_label", new_callable=AsyncMock) as write_label:
+        await info_gatherer._escalate_human_needed(
+            conv.id, 52, "University clarification reply failed twice — FallBack stub",
+        )
+
+    set_state.assert_awaited_once_with(conv.id)
+    write_label.assert_awaited_once_with(52)
+
+
+@pytest.mark.asyncio
+async def test_should_append_human_needed_label_when_missing():
+    with patch("app.chatwoot_client.get_labels", new_callable=AsyncMock, return_value=["ogrenci"]), \
+         patch("app.chatwoot_client.set_labels", new_callable=AsyncMock) as set_labels:
+        set_labels.return_value.ok = True
+        await info_gatherer._write_human_needed_label(52)
+
+    set_labels.assert_awaited_once_with(52, ["ogrenci", "human_needed"])
+
+
+@pytest.mark.asyncio
 async def test_should_send_istanbul_canned_and_complete_on_fire_out_of_city():
     conv = _conversation(flow_state="awaiting_university", clarification_attempt=0)
 
@@ -219,3 +244,24 @@ async def test_should_reprompt_on_first_invalid_campus_reply():
     send.assert_awaited_once_with(52, info_gatherer.CANNED_CLARIFY_CAMPUS_NAME)
     inc.assert_awaited_once_with(conv.id)
     escalate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_should_proceed_to_gender_when_university_on_deal_awaiting_list():
+    """Post-match no longer short-circuits deal_awaiting members — RecEngine decides."""
+    conv = _conversation(flow_state="awaiting_university")
+    uni = _istanbul_uni("İstanbul Üniversitesi Cerrahpaşa")
+
+    with patch.object(info_gatherer.queries, "reset_clarification_attempt", new_callable=AsyncMock), \
+         patch.object(info_gatherer.queries, "set_conversation_university", new_callable=AsyncMock), \
+         patch.object(info_gatherer.queries, "update_conversation_state", new_callable=AsyncMock, return_value=True) as update, \
+         patch.object(info_gatherer.queries, "is_deal_awaiting_university", new_callable=AsyncMock, return_value=True), \
+         patch.object(info_gatherer, "_send_canned", new_callable=AsyncMock) as send, \
+         patch.object(info_gatherer, "_write_deal_awaiting_label", new_callable=AsyncMock) as write_label, \
+         patch.object(info_gatherer, "_send_hotel_responses", new_callable=AsyncMock) as send_hotel:
+        await info_gatherer._handle_post_match(conv, 52, uni.id)
+
+    update.assert_awaited_once_with(conv.id, "awaiting_gender", conv.flow_state)
+    send.assert_awaited_once_with(52, info_gatherer.CANNED_KIZ_ERKEK)
+    write_label.assert_not_awaited()
+    send_hotel.assert_not_awaited()

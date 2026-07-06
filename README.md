@@ -420,7 +420,7 @@ InfoGatherer is a **finite state machine** with optimistic locking via `update_c
 
 **Step 2 — Direct hotel-name match (fallback).** If phrase gate did not already fire the hotel path, `match_hotel_by_ngram()` scans 1–4 word n-grams against `hotels.name` → send that hotel's `response_schemas`, state → `completed`. No gender/university, no RecEngine.
 
-**Step 3 — `Üniversitem:` line match.** Search that line ±1 line for university match. Match → set `university_id`, proceed to gender or `deal_awaiting` check.
+**Step 3 — `Üniversitem:` line match.** Search that line ±1 line for university match. Match → set `university_id`, proceed to gender.
 
 **Step 4 — Keyword-based match.** Search for `Üniversitesi`, `Üni`, `uni`, etc.; run matching on same line ±1 line.
 
@@ -464,25 +464,33 @@ Requires migration **014** (`clarification_attempt` column + `clarify_*` canned 
 
 **Gender not matched** (`awaiting_gender`): Silent `human_needed`.
 
-### `deal_awaiting` path (V0 amendment)
+### `deal_awaiting` path (post-RecEngine)
 
-After a successful university match, **before** RecEngine:
+Every successful Istanbul match proceeds to gender → RecEngine. On `NOT_FOUND`:
 
 ```
-university matched
-  → is university_id in deal_awaiting_universities?
-      → YES: set deal_awaiting label + send DEAL-AWAITING-STATE canned response → terminal
-      → NO:  proceed to gender → RecEngine
+RecEngine candidates=[]
+  → university_id in deal_awaiting_universities?
+      → YES: DEAL-AWAITING-LABEL-STATE (…0003) + deal_awaiting Chatwoot label
+      → NO:  DEAL-AWAITING-STATE (…0002), no label
 ```
+
+Both sentinels send the same pending-deal canned copy (order 0). `FOUND` always wins over list membership.
+
+**List semantics:** `deal_awaiting_universities` = Istanbul schools you **plan to serve** (deal in progress). On list + NULL → Chatwoot `deal_awaiting` label. Not on list + NULL → message only. See spec 017.
 
 | Outcome | Meaning | When |
 |---------|---------|------|
-| `GLOBAL-NULL-STATE` | No hotel for this gender/university profile | After RecEngine, 0 candidates |
-| `DEAL-AWAITING-STATE` | University not served yet (inventory gap) | Before RecEngine, membership check |
+| `DEAL-AWAITING-STATE` (…0002) | NULL; school **not** on ops list (no label) | After RecEngine, not on list |
+| `DEAL-AWAITING-LABEL-STATE` (…0003) | NULL; school **on** list — deal in progress, plan to serve | After RecEngine, on list → `deal_awaiting` label |
+| `GLOBAL-NULL-STATE` (…0001) | Fallback if sentinel missing | Callback safety net |
 
 Sentinel hotel UUIDs:
-- `00000000-0000-0000-0000-000000000001` — GLOBAL-NULL-STATE
+- `00000000-0000-0000-0000-000000000001` — GLOBAL-NULL-STATE (fallback)
 - `00000000-0000-0000-0000-000000000002` — DEAL-AWAITING-STATE
+- `00000000-0000-0000-0000-000000000003` — DEAL-AWAITING-LABEL-STATE
+
+See [`docs/017_deal_awaiting_recengine_spec.md`](docs/017_deal_awaiting_recengine_spec.md).
 
 ### Canned response resolution
 
@@ -691,7 +699,7 @@ Enforced by `label_resolver.py` regardless of prompt content:
 
 **ROUTER-COMPUTED** (never LLM-decided):
 
-- `deal_awaiting` — set by InfoGatherer
+- `deal_awaiting` — set by RecEngine callback when sentinel is `…0003`
 - `university`, `ogrenci_cinsiyet`, `ilgili_otel` — written by Router
 
 ### Queue and throttle
@@ -761,7 +769,7 @@ V2 will also unlock sales-action labels (`aranacak`, `arandi`, etc.) via NetGSM/
 
 | Table | Purpose |
 |-------|---------|
-| `deal_awaiting_universities` | Universities not yet served |
+| `deal_awaiting_universities` | Istanbul schools with deals in progress (ops list for Chatwoot label on NULL) |
 
 **Tier D — TagAssigner** (migrations 007–010):
 
@@ -824,6 +832,7 @@ Migrations live in `migrations/` (001–014). **There is no automated migration 
 | 004 | `004_create_university_aliases.sql` | Alias table (redundant on fresh DB) |
 | 005 | `005_add_contact_phone_to_conversations.sql` | `contact_phone` for testing filter |
 | 006 | `006_deal_awaiting.sql` | `deal_awaiting_universities` + DEAL-AWAITING-STATE sentinel |
+| 016 | `016_deal_awaiting_recengine.sql` | DEAL-AWAITING-LABEL-STATE sentinel + RecEngine wiring |
 | 007 | `007_tagassigner_runs_and_logs.sql` | TagAssigner run tracking |
 | 008 | `008_conversations_columns.sql` | `last_message_at`, run counters, attribute columns |
 | 009 | `009_hotel_chatwoot_label_map.sql` | Hotel → Chatwoot label mapping |

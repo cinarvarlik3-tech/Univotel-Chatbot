@@ -81,6 +81,7 @@ async def _send_hotel_responses(
             explanation=f"No matching row in response_schemas for hotel_id={hotel_id}",
         ))
         await queries.set_conversation_human_needed(conversation_id)
+        await _write_human_needed_label(chatwoot_id)
         return False
 
     for content in contents:
@@ -130,6 +131,7 @@ async def _log_phrase_gate_ignore(conversation_id: uuid.UUID, reason: str) -> No
 
 async def _escalate_human_needed(
     conversation_id: uuid.UUID,
+    chatwoot_id: int,
     explanation: str,
     internal_class: Optional[str] = None,
     status_code: Optional[str] = None,
@@ -145,6 +147,7 @@ async def _escalate_human_needed(
         explanation=explanation,
     ))
     await queries.set_conversation_human_needed(conversation_id)
+    await _write_human_needed_label(chatwoot_id)
 
 
 def _extract_university_candidate(text: str) -> Optional[str]:
@@ -211,6 +214,14 @@ async def _build_campus_question(parent_id: uuid.UUID) -> Optional[str]:
 
 
 async def _write_deal_awaiting_label(chatwoot_id: int) -> None:
+    await _append_chatwoot_label(chatwoot_id, "deal_awaiting")
+
+
+async def _write_human_needed_label(chatwoot_id: int) -> None:
+    await _append_chatwoot_label(chatwoot_id, "human_needed")
+
+
+async def _append_chatwoot_label(chatwoot_id: int, label: str) -> None:
     from app.chatwoot_client import get_labels, set_labels
 
     current = await get_labels(chatwoot_id)
@@ -220,12 +231,12 @@ async def _write_deal_awaiting_label(chatwoot_id: int) -> None:
             chatwoot_id,
         )
         return
-    if "deal_awaiting" not in current:
-        result = await set_labels(chatwoot_id, current + ["deal_awaiting"])
+    if label not in current:
+        result = await set_labels(chatwoot_id, current + [label])
         if not result.ok:
             logger.error(
-                "InfoGatherer: failed to write deal_awaiting label for conversation %d: %s",
-                chatwoot_id, result.error,
+                "InfoGatherer: failed to write %s label for conversation %d: %s",
+                label, chatwoot_id, result.error,
             )
 
 
@@ -236,15 +247,6 @@ async def _handle_post_match(
 ) -> None:
     cid = conversation.id
     await queries.reset_clarification_attempt(cid)
-
-    if await queries.is_deal_awaiting_university(university_id):
-        advanced = await queries.update_conversation_state(cid, "completed", conversation.flow_state)
-        if not advanced:
-            return
-        await queries.set_conversation_university(cid, university_id)
-        await _write_deal_awaiting_label(cwid)
-        await _send_hotel_responses(cid, cwid, queries.DEAL_AWAITING_STATE_ID)
-        return
 
     await queries.set_conversation_university(cid, university_id)
     advanced = await queries.update_conversation_state(cid, "awaiting_gender", conversation.flow_state)
@@ -268,7 +270,7 @@ async def _handle_parent_match(
 
     if not campuses:
         await _escalate_human_needed(
-            cid,
+            cid, cwid,
             f"Parent university {parent_university_id} has no campus rows — cannot escalate",
         )
         return
@@ -276,7 +278,7 @@ async def _handle_parent_match(
     question = await _build_campus_question(parent_university_id)
     if not question:
         await _escalate_human_needed(
-            cid,
+            cid, cwid,
             f"Failed to build campus question for parent {parent_university_id}",
         )
         return
@@ -443,7 +445,7 @@ async def _handle_university_no_match(
 
     if conversation.clarification_attempt >= 1:
         await _escalate_human_needed(
-            cid,
+            cid, cwid,
             f"University clarification reply '{content[:80]}' failed twice — FallBack stub",
         )
         return
@@ -494,7 +496,7 @@ async def _handle_clarification(
             await _fire_out_of_city(conversation, cwid)
             return
         await _escalate_human_needed(
-            cid,
+            cid, cwid,
             f"University clarification reply '{content[:80]}' matched neither Istanbul nor out-of-city — FallBack stub",
         )
         return
@@ -518,7 +520,7 @@ async def _handle_awaiting_campus_clarification(
     parent_id = conversation.pending_parent_university_id
     if not parent_id:
         await _escalate_human_needed(
-            cid,
+            cid, cwid,
             "awaiting_campus_clarification with no pending_parent_university_id — data inconsistency",
             internal_class="missing_pending_parent",
         )
@@ -526,7 +528,7 @@ async def _handle_awaiting_campus_clarification(
 
     campuses = await queries.get_campuses_for_parent(parent_id)
     if not campuses:
-        await _escalate_human_needed(cid, f"No campus rows for pending parent {parent_id}")
+        await _escalate_human_needed(cid, cwid, f"No campus rows for pending parent {parent_id}")
         return
 
     all_aliases = await queries.get_all_university_aliases()
@@ -550,7 +552,7 @@ async def _handle_awaiting_campus_clarification(
     if not matched:
         if conversation.clarification_attempt >= 1:
             await _escalate_human_needed(
-                cid,
+                cid, cwid,
                 f"Campus clarification reply '{content[:80]}' failed twice — FallBack stub",
             )
             return
@@ -575,7 +577,7 @@ async def _handle_awaiting_gender(
     elif GENDER_MALE.search(content):
         gender = "male"
     else:
-        await _escalate_human_needed(cid, "Gender reply did not match known keywords")
+        await _escalate_human_needed(cid, cwid, "Gender reply did not match known keywords")
         return
 
     await queries.set_conversation_gender(cid, gender)
@@ -583,7 +585,7 @@ async def _handle_awaiting_gender(
     fresh = await queries.get_conversation_by_chatwoot_id(conversation.chatwoot_conversation_id)
     if not fresh or not fresh.university_id or not fresh.gender:
         await _escalate_human_needed(
-            cid,
+            cid, cwid,
             "Custom attribute write failed, retried to parse but failed; aborted after retry. FallBack call.",
             internal_class="attr_write_failed",
             status_code="500",
@@ -613,6 +615,6 @@ async def _handle_post_completion(
         await _fire_hotel_path(conversation, cwid, hotel.id)
         return
     await _escalate_human_needed(
-        cid,
+        cid, cwid,
         "Post-completion message did not name a specific hotel — deferred to human",
     )

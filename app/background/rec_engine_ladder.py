@@ -59,6 +59,8 @@ async def fire_rec_engine(
         conversation_id,
     )
     await queries.set_conversation_human_needed(conversation_id)
+    from app.layers.info_gatherer import _write_human_needed_label
+    await _write_human_needed_label(chatwoot_conversation_id)
 
 
 async def _post_start(

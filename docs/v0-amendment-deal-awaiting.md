@@ -1,6 +1,9 @@
 # Univotel Chatbot — V0 Amendment Note: `deal_awaiting` Flow
 
-**Status:** Ready for implementation
+> **Superseded by [`017_deal_awaiting_recengine_spec.md`](017_deal_awaiting_recengine_spec.md).**  
+> The pre-gender InfoGatherer branch described below is **removed**. The list now means schools you **plan to serve** (deal in progress); the `deal_awaiting` label is written post-RecEngine when NULL + on list. Kept for historical context only.
+
+**Status:** Superseded  
 **Amends:** V0 spec (InfoGatherer / RecEngine)
 **Reason:** The `deal_awaiting` concept surfaced during V1 (TagAssigner) planning, but it is **not** a tagging concern — it is a deterministic InfoGatherer outcome. It belongs in the V0 flow, documented separately so the InfoGatherer logic stays in one place.
 

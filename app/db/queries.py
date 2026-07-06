@@ -23,6 +23,16 @@ logger = logging.getLogger(__name__)
 
 GLOBAL_NULL_STATE_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 DEAL_AWAITING_STATE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+DEAL_AWAITING_LABEL_STATE_ID = uuid.UUID("00000000-0000-0000-0000-000000000003")
+
+# Canned response wired to …0002 and …0003 (pending-deal / henüz-style copy).
+PENDING_DEAL_RESPONSE_ID = uuid.UUID("27ac4381-1c05-4dd6-adc5-2449c8cef639")
+
+SENTINEL_HOTEL_IDS = (
+    GLOBAL_NULL_STATE_ID,
+    DEAL_AWAITING_STATE_ID,
+    DEAL_AWAITING_LABEL_STATE_ID,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -980,6 +990,15 @@ async def deal_awaiting_state_is_wired() -> bool:
     return row["cnt"] > 0
 
 
+async def deal_awaiting_label_state_is_wired() -> bool:
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT COUNT(*) AS cnt FROM response_schemas WHERE hotel_id = $1",
+        DEAL_AWAITING_LABEL_STATE_ID,
+    )
+    return row["cnt"] > 0
+
+
 async def get_visible_hotels_missing_label_map() -> list[uuid.UUID]:
     """Returns ids of visible (recommendable) hotels with no hotel_chatwoot_label_map row."""
     pool = get_pool()
@@ -987,12 +1006,12 @@ async def get_visible_hotels_missing_label_map() -> list[uuid.UUID]:
         """
         SELECT h.id FROM hotels h
         WHERE h.is_visible = true
-          AND h.id NOT IN ($1, $2)
+          AND h.id NOT IN ($1, $2, $3)
           AND NOT EXISTS (
               SELECT 1 FROM hotel_chatwoot_label_map m WHERE m.hotel_id = h.id
           )
         """,
-        GLOBAL_NULL_STATE_ID, DEAL_AWAITING_STATE_ID,
+        *SENTINEL_HOTEL_IDS,
     )
     return [r["id"] for r in rows]
 
