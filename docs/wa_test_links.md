@@ -1,5 +1,7 @@
 # Univotel Chatbot — Functional Test Message Links (F1–F10)
 
+**Off-script / answer-classifier live tests (O1–O10):** [`wa_test_off_script_detection.md`](wa_test_off_script_detection.md)
+
 All links direct to the Univotel WhatsApp number (`0212 909 52 44` → `902129095244`).
 Click each link in order within a test; the message opens prefilled in WhatsApp — hit send.
 **Run the teardown SQL between tests** (reset conversation state) or state bleeds over.
@@ -25,6 +27,10 @@ UPDATE conversations SET flow_state=NULL, university_id=NULL, gender=NULL,
    2026-07-04 20:41:29,226 INFO app.layers.info_gatherer InfoGatherer: phrase gate failed for conversation a1651d59-db6e-4611-ae26-3438256cfee4
    //Proceeding to step 2 with a phrase that has been proven to work.
 
+   AFTER ATTEMPTED FIXES
+   //Phrase gate issue has been resolved
+   //Other points were already success
+
 2. **`boğaziçi`**
    https://wa.me/902129095244?text=bo%C4%9Fazi%C3%A7i
 
@@ -40,6 +46,7 @@ UPDATE conversations SET flow_state=NULL, university_id=NULL, gender=NULL,
    //When gender is provided, returned the correct result from RecEngine. 
    SUCCESS STEP
 
+FULL STAGE SUCCESS
 
 *(run teardown after this test)*
 
@@ -52,12 +59,20 @@ UPDATE conversations SET flow_state=NULL, university_id=NULL, gender=NULL,
    //InfoGatherer's phrase gate needs to be expanded with more if-then scenarios. It should be able to recognize and return simple greetings, subtle inquiries etc.
    //Proceeding to step 2 with a guaranteed text. 
 
+   AFTER ATTEMPTED FIX
+   //Phrase gate issue has been resolved
+   //Other parts were already working
+
 2. **`bogazici`**
    https://wa.me/902129095244?text=bogazici
 
    //Input received successfully
    //bogazici mapped to Boğaziçi successfully
    SUCCESS STEP
+
+FULL STAGE SUCCESS -- NOTE: When "merhaba" is included and no context is given there should be a neutral 
+greeting before sending the university question like "Merhabalar efendim.". Rn works as intended, this is
+purely a product design decision. 
 
 *(run teardown after this test)*
 
@@ -68,6 +83,9 @@ UPDATE conversations SET flow_state=NULL, university_id=NULL, gender=NULL,
 
    //Phrase gate
    //Proceeding to 2 with guaranteed script
+
+   AFTER ATTEMPTED FIX
+   //Phrase gate issue resolved
 
 2. **`üsküdar`**
    https://wa.me/902129095244?text=%C3%BCsk%C3%BCdar
@@ -86,6 +104,9 @@ UPDATE conversations SET flow_state=NULL, university_id=NULL, gender=NULL,
    //maybe some more absolute rules can be added like "school an dorm must be on the same continent". 
    SUCCESS STEP - Needs product design choices
 
+PHRASE GATE SUCCESS -- NEEDS PRODUCT DESIGN CHOICES: Hotel - university match geographical limiatations or 
+priorityScore district distribution. Either way strengthening of the RecEngine output flow to be more precise.
+
 *(run teardown after this test)*
 
 ## F4 — Doğuş — rounded-vowel suffixes mu/mü
@@ -96,6 +117,10 @@ UPDATE conversations SET flow_state=NULL, university_id=NULL, gender=NULL,
    //phrase gate
    //Proceeding to step 2 with guaranteed message
 
+   AFTER ATTEMPTED FIX
+   //Phrase gate success
+   //Other points were already success
+
 2. **`doğuş`**
    https://wa.me/902129095244?text=do%C4%9Fu%C5%9F
 
@@ -103,6 +128,8 @@ UPDATE conversations SET flow_state=NULL, university_id=NULL, gender=NULL,
    //Parent escalation success
    //Suffixes success
    SUCCESS STEP
+
+FULL STAGE SUCCESS
 
 *(run teardown after this test)*
 
@@ -112,7 +139,11 @@ UPDATE conversations SET flow_state=NULL, university_id=NULL, gender=NULL,
    https://wa.me/902129095244?text=Merhaba%2C%20yurt%20ar%C4%B1yorum
 
    //Phrase gate
-   //Proceeding with guaranteed text
+   //Proceeding with guaranteed 
+   
+   AFTER ATTEMPTED FIX
+   //Phrase gate issue resolved
+   //Other points were already success
 
 2. **`su`**
    https://wa.me/902129095244?text=su
@@ -120,6 +151,8 @@ UPDATE conversations SET flow_state=NULL, university_id=NULL, gender=NULL,
    //Short name to university attribution success
    //Single campus parent, no escalation success
    SUCCESS STEP
+
+FULL STAGE SUCCESS
 
 *(run teardown after this test)*
 
@@ -135,6 +168,8 @@ UPDATE conversations SET flow_state=NULL, university_id=NULL, gender=NULL,
 
    //Short name to university attribution success
    //Single campus parent, no escalation success
+
+FULL STAGE SUCCESS
 
 *(run teardown after this test)*
 
@@ -188,6 +223,8 @@ UPDATE conversations SET flow_state=NULL, university_id=NULL, gender=NULL,
    //Escalation to ask again FAILED
    FAILED STEP
 
+Works FULL STAGE SUCCESS 
+
 *(run teardown after this test)*
 
 ## F7 — ★ CROSS-PARENT COLLISION (Beykent → Ayazağa, must NOT be İTÜ) ★
@@ -196,6 +233,9 @@ UPDATE conversations SET flow_state=NULL, university_id=NULL, gender=NULL,
    https://wa.me/902129095244?text=Merhaba%2C%20%C3%BCniversiteme%20yak%C4%B1n%20yer%20ar%C4%B1yorum
 
    //Phrase gate alt reply
+
+   AFTER ATTEMPTED FIX 
+   //Phrase gate issue resolved
 
 2. **`beykent`**
    https://wa.me/902129095244?text=beykent
@@ -230,6 +270,25 @@ UPDATE conversations SET flow_state=NULL, university_id=NULL, gender=NULL,
 
    //No path for invalid campus name, just freezes. FAIL
    FAILED STEP
+
+   AFTER ATTEMPTED FIX
+   //Phrase gate issue resolved, success
+   //Invalid campus name triggers remprompting, success
+   //Recognizes valid campus name after reprompting, success
+   //Invalid campus name for a second time after reprompting freezes, fail
+      --was supposed to trigger out-of-city-submission canned response
+   //Double invalid university name submission reprompts with the same message
+   //Triple invalid university name submission reprompts with the same message
+      --makes sense actually. We'd try 2 times though, with slightly different messages, and InfoGatherer abandons in second invalid submisison. It calls FallBack which confirms it was invalid or matches to a university, then returns the result to InfoGatherer. If it's a valid university outside of istanbul return out-of-city-submission message. If it is completely invalid, (doesnt exist in Türkiye) abandon and don't respond. If it's a valid university in İstanbul, return that to InfoGatherer and have it continue to gender. 
+      --Would adding a full list of Turkish universities across the country actually be a good addition at this point I wonder. I've been deferring it for a while but I keep running into different issues caused by the same reason, which is that table not existing. Might be worth it to add as a second table. 
+
+   Unexpected Finding: When testing double invalid university submission, I input TÖÜ as a university we don't have. The script caught this as "Koç Üniversitesi" and flagged it as such. Replicated twice with teardown, saving the terminal output so that we can diagnose later. This is a sign to make semantic matching stricter.  
+   
+   PARTIAL STAGE SUCCESS -- Needs to handle worst case logic. Considerations below;
+   -How smart is it to return out-of-city-submission canned response for a recognized school's unrecognized campus? If the school passed the city screening it must be in İstanbul, so the campus can't be out of city; what alternative could be implemented in double invalid campus name submission?
+   -Is the reprompting for invalid university/invalid campus the right call?
+   -Is adding a full list of Turkish universities across the country, comparing inputs with no match to the current universities there; and flagging "out of city" if they match a university row in that table, the "city" field of which contains anything other than "istanbul" a good architecture decision?
+   -Do we need to and if yes how do we make the university name matching stricter?
 
 *(run teardown after this test)*
 

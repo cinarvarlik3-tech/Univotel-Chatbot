@@ -5,20 +5,19 @@ Kept modular: the V2 CRM/sales-action context block slots in here without a rewr
 Attribute list is config-driven (TAGASSIGNER_ATTRIBUTE_KEYS) — not hardcoded —
 so a Chatwoot attribute cleanup requires no code changes.
 
-Gemini receives:
-- Conversation messages (full history or since-last-run depending on trigger type)
-- All custom attributes as read-only context
-- Current label set
-- university_id and gender (InfoGatherer's authoritative values, read-only for Gemini)
-
-Gemini returns ONLY the proposed label set. It never decides attribute values.
+Gemini receives conversation messages, custom attributes as context, current labels,
+and returns a full snapshot of labels plus bot-writable attributes (spec 018).
 """
 from __future__ import annotations
+import json
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from app.db.models import Conversation, Message
-from app.config import TAGASSIGNER_ATTRIBUTE_KEYS
+from app.config import TAGASSIGNER_ATTRIBUTE_KEYS, TAGASSIGNER_BOT_WRITABLE_ATTRIBUTES
+from app.tagassigner.gemini_types import GeminiTagResult
+from app.tagassigner.attribute_helpers import gender_enum_to_display
 
 _PROMPT_PATH = Path(__file__).parent.parent.parent / "system_prompts" / "tagassigner_prompt.md"
 
@@ -32,6 +31,7 @@ def build_payload(
     conversation: Conversation,
     messages: list[Message],
     current_labels: list[str],
+    university_display: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Build the structured payload for a Gemini live call.
@@ -39,9 +39,11 @@ def build_payload(
     Returns a dict with:
     - system_prompt: str
     - user_content: str  (the conversation transcript + context)
+
+    university_display: resolved Chatwoot list string for university_id (from Router).
     """
     transcript = _build_transcript(messages)
-    context = _build_context(conversation, current_labels)
+    context = _build_context(conversation, current_labels, university_display)
 
     user_content = f"{context}\n\n## Konuşma\n{transcript}"
 
@@ -56,12 +58,13 @@ def build_batch_request(
     messages: list[Message],
     current_labels: list[str],
     custom_id: str,
+    university_display: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Build a single Gemini Batch API request object.
     custom_id is used to correlate results back to conversations.
     """
-    payload = build_payload(conversation, messages, current_labels)
+    payload = build_payload(conversation, messages, current_labels, university_display)
     return {
         "custom_id": custom_id,
         "system_prompt": payload["system_prompt"],
@@ -79,18 +82,26 @@ def _build_transcript(messages: list[Message]) -> str:
     return "\n".join(lines) if lines else "(Konuşma mesajı bulunamadı)"
 
 
-def _build_context(conversation: Conversation, current_labels: list[str]) -> str:
+def _build_context(
+    conversation: Conversation,
+    current_labels: list[str],
+    university_display: Optional[str] = None,
+) -> str:
     """
-    Assembles the read-only context block for Gemini.
-    Attribute list is driven by TAGASSIGNER_ATTRIBUTE_KEYS (config-driven, not hardcoded).
+    Assembles the context block for Gemini.
+    Human-only attributes are read-only; bot-writable fields appear for snapshot output.
     """
-    lines = ["## Mevcut Durum (salt-okunur — bu değerleri değiştirme)"]
+    lines = ["## Mevcut Durum"]
 
-    # InfoGatherer columns (authoritative)
-    lines.append(f"university_id: {conversation.university_id or 'bilinmiyor'}")
-    lines.append(f"gender: {conversation.gender or 'bilinmiyor'}")
+    uni_str = university_display or "bilinmiyor"
+    gender_str = gender_enum_to_display(conversation.gender) if conversation.gender else "bilinmiyor"
 
-    # Config-driven attribute columns
+    lines.append("### Bot-writable (echo in attributes output — full snapshot)")
+    lines.append(f"university: {uni_str}")
+    lines.append(f"ogrenci_cinsiyet: {gender_str}")
+    lines.append(f"oda_tiipi: {conversation.oda_tiipi if conversation.oda_tiipi else 'boş'}")
+
+    lines.append("### Human-only (context for labelling — never in attributes output)")
     for key in TAGASSIGNER_ATTRIBUTE_KEYS:
         value = getattr(conversation, key, None)
         lines.append(f"{key}: {value if value is not None else 'boş'}")
@@ -100,15 +111,11 @@ def _build_context(conversation: Conversation, current_labels: list[str]) -> str
     return "\n".join(lines)
 
 
-def parse_gemini_response(raw: str) -> list[str] | None:
+def parse_gemini_tag_result(raw: str) -> GeminiTagResult | None:
     """
-    Parse Gemini's JSON response into a label list.
-    Returns None if the response is malformed.
+    Parse Gemini's JSON response into labels + bot-writable attributes (spec 018).
+    Returns None if malformed. Attributes key is required.
     """
-    import json
-    import re
-
-    # Strip markdown code fences if present
     raw = re.sub(r"```(?:json)?\s*", "", raw).strip()
 
     try:
@@ -123,4 +130,25 @@ def parse_gemini_response(raw: str) -> list[str] | None:
     if not isinstance(labels, list):
         return None
 
-    return [str(label) for label in labels if isinstance(label, str)]
+    attributes = data.get("attributes")
+    if not isinstance(attributes, dict):
+        return None
+
+    label_list = [str(label) for label in labels if isinstance(label, str)]
+
+    attr_out: dict[str, str] = {}
+    for key in TAGASSIGNER_BOT_WRITABLE_ATTRIBUTES:
+        if key not in attributes:
+            return None
+        val = attributes[key]
+        if not isinstance(val, str):
+            return None
+        attr_out[key] = val
+
+    return GeminiTagResult(labels=label_list, attributes=attr_out)
+
+
+def parse_gemini_response(raw: str) -> list[str] | None:
+    """Backward-compatible wrapper — labels only. Prefer parse_gemini_tag_result."""
+    result = parse_gemini_tag_result(raw)
+    return result.labels if result else None

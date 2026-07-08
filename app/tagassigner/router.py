@@ -1,22 +1,17 @@
 """
 TagAssigner Script Router — the single I/O broker (§1 of tagassigner-v1-spec.md).
 
-Orchestrates the full pipeline per run:
-  1. Read current labels live from Chatwoot (not the DB replica)
-  2. Fetch messages (full history or since-last-run)
-  3. Call Gemini → receive proposed label set
-  4. Run label resolution (4-list enforce, mutex, terminal guard, merge)
-  5. Write resolved labels to Chatwoot
-  6. Write deterministic attributes (university / ogrenci_cinsiyet / ilgili_otel)
-  7. Mark run success + reset message counter
+Orchestrates the full pipeline per run (spec 018):
+  DB → Router → Gemini → Router → DB → Chatwoot
 
-Gemini never touches the DB or Chatwoot directly. The Router is the only caller.
+Gemini never touches the DB or Chatwoot directly. The Router is the sole authority.
 """
 from __future__ import annotations
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Union
 
 from app.config import settings, TESTING_PHONE_ALLOWLIST
 from app.db import queries
@@ -25,22 +20,19 @@ from app.chatwoot_client import get_labels, set_labels
 from app.tagassigner.label_resolver import resolve_labels, remove_tag_trigger_label
 from app.tagassigner.payload_builder import build_payload
 from app.tagassigner.gemini_client import call_gemini
-from app.tagassigner.attribute_resolver import resolve_and_write_attributes
+from app.tagassigner.attribute_resolver import push_chatwoot_attribute_patches
+from app.tagassigner.gemini_types import GeminiTagResult
+from app.tagassigner.attribute_merger import merge_attributes
+from app.tagassigner.attribute_helpers import gender_enum_to_display
+from app.tagassigner.info_check import apply_info_check, strip_gemini_info_check
 from app.webhooks.chatwoot import record_self_write
 
 logger = logging.getLogger(__name__)
 
-# Write-back retry delays (1s/2s/4s — mirrors send_retry.py)
 _WRITEBACK_DELAYS = [1.0, 2.0, 4.0]
 
 
 def _is_taggable_in_testing_mode(conv: Conversation) -> bool:
-    """
-    Backstop for TESTING_LIMITATIONS_MODE at the router (the universal chokepoint
-    for the live Gemini path). When testing mode is off, everything is taggable.
-    When on, only conversations whose contact_phone is on the allowlist may run.
-    contact_phone is stored already-normalized (digits only) at webhook ingest.
-    """
     if not settings.testing_limitations_mode:
         return True
     return conv.contact_phone in TESTING_PHONE_ALLOWLIST
@@ -52,11 +44,6 @@ async def run_tagging(
     trigger_type: str,
     read_full_history: bool,
 ) -> bool:
-    """
-    Full TagAssigner run. run_id is pre-generated; the 'processing' row is written
-    before this is called (by the queue worker). Returns True on success.
-    """
-    # Guard: if the run row is already resolved (retry found a prior success), no-op.
     existing = await queries.get_tagassigner_run(run_id)
     if existing and existing.status in ("success", "failed"):
         logger.info(
@@ -71,8 +58,6 @@ async def run_tagging(
         await queries.update_tagassigner_run_failed(run_id)
         return False
 
-    # Testing-mode backstop: even if something was enqueued, never tag a
-    # conversation whose contact is off the allowlist while testing mode is on.
     if not _is_taggable_in_testing_mode(conv):
         logger.info(
             "TagAssigner router: TESTING_MODE — conversation %s not on allowlist, skipping run %s",
@@ -83,7 +68,6 @@ async def run_tagging(
 
     await _log(run_id, conversation_id, "db_read", "router", "supabase", True, "200")
 
-    # Step 1: read current labels live from Chatwoot
     current_labels = await get_labels(conv.chatwoot_conversation_id)
     if current_labels is None:
         logger.error(
@@ -96,27 +80,24 @@ async def run_tagging(
 
     await _log(run_id, conversation_id, "api", "router", "chatwoot", True, "200")
 
-    # Remove the 'tag' trigger label before passing to Gemini (it's a trigger, not a state)
     current_labels_clean = remove_tag_trigger_label(current_labels)
 
-    # Step 2: fetch messages
     if read_full_history:
         messages = await queries.get_messages_for_conversation(conversation_id)
     else:
-        # Message-triggered run: read only since last successful run
         last_run = await _get_last_successful_run(conversation_id)
         since = last_run.completed_at if last_run else None
         messages = await queries.get_messages_for_conversation(conversation_id, since=since)
 
-    # Step 3: call Gemini
-    payload = build_payload(conv, messages, current_labels_clean)
+    university_display = await _university_display_for_conv(conv)
+    payload = build_payload(conv, messages, current_labels_clean, university_display)
 
-    proposed_labels = await call_gemini(
+    gemini_result = await call_gemini(
         system_prompt=payload["system_prompt"],
         user_content=payload["user_content"],
     )
 
-    if proposed_labels is None:
+    if gemini_result is None:
         logger.error(
             "TagAssigner router: Gemini call failed for conversation %s", conversation_id
         )
@@ -127,24 +108,32 @@ async def run_tagging(
 
     await _log(run_id, conversation_id, "api", "router", "gemini", True, "200")
 
-    # Cache the Gemini result for write-back retry (never re-calls Gemini on retry)
-    await queries.update_tagassigner_run_success(run_id, {"labels": proposed_labels})
+    await queries.update_tagassigner_run_success(
+        run_id,
+        {"labels": gemini_result.labels, "attributes": gemini_result.attributes},
+    )
 
-    return await apply_resolved_labels(conversation_id, run_id, proposed_labels,
-                                       current_labels=current_labels_clean)
+    return await apply_tagassigner_result(
+        conversation_id, run_id, gemini_result, current_labels=current_labels_clean
+    )
 
 
-async def apply_resolved_labels(
+async def apply_tagassigner_result(
     conversation_id: uuid.UUID,
     run_id: uuid.UUID,
-    proposed_labels: list[str],
+    result: Union[GeminiTagResult, dict],
     current_labels: Optional[list[str]] = None,
 ) -> bool:
     """
-    Apply the resolved label pipeline and write back to Chatwoot.
-    Called both by run_tagging() and by the batch results handler.
-    Uses cached gemini_result for write-back retry — never re-calls Gemini.
+    Apply label + attribute merge pipeline and write back to Chatwoot.
+    Called by run_tagging() and the batch results handler.
     """
+    if isinstance(result, dict):
+        result = _gemini_result_from_dict(result)
+        if result is None:
+            await queries.update_tagassigner_run_failed(run_id)
+            return False
+
     conv = await queries.get_conversation_by_id(conversation_id)
     if not conv:
         return False
@@ -152,13 +141,51 @@ async def apply_resolved_labels(
     if current_labels is None:
         current_labels = await get_labels(conv.chatwoot_conversation_id) or conv.labels or []
 
-    # Step 4: label resolution (pure — no I/O)
-    resolved = resolve_labels(current_labels, proposed_labels)
+    labels_for_resolve = strip_gemini_info_check(result.labels)
+    resolved = resolve_labels(current_labels, labels_for_resolve)
 
-    # Step 5: write resolved labels to Chatwoot (merge — only if changed)
-    if set(resolved) != set(current_labels):
+    university_display = await _university_display_for_conv(conv)
+    proposed_uni = result.attributes.get("university", "bilinmiyor")
+    resolved_uni_id = await queries.get_university_id_for_chatwoot_list_value(
+        proposed_uni.strip()
+    ) if proposed_uni.strip() not in ("bilinmiyor", "boş", "") else None
+
+    merge_result = merge_attributes(
+        conv,
+        result.attributes,
+        current_university_display=university_display,
+        resolved_university_id=resolved_uni_id,
+        chat_has_multiple_universities=False,
+    )
+
+    if merge_result.has_accepted_updates:
+        await queries.apply_tagassigner_attribute_updates(
+            conversation_id,
+            university_id=merge_result.university_id,
+            gender=merge_result.gender,
+            gender_clear=merge_result.gender_clear,
+            oda_tiipi=merge_result.oda_tiipi,
+        )
+        conv = await queries.get_conversation_by_id(conversation_id)
+        if not conv:
+            return False
+
+    now = datetime.now(tz=timezone.utc)
+    info_decision = apply_info_check(resolved, conv, merge_result.blocked_mismatches, now)
+
+    if info_decision.clear_active:
+        await queries.update_info_check_state(conversation_id, clear_active=True)
+    elif info_decision.fingerprint:
+        await queries.update_info_check_state(
+            conversation_id,
+            fingerprint=info_decision.fingerprint,
+            added_at=info_decision.added_at,
+        )
+
+    final_labels = info_decision.labels
+    if set(final_labels) != set(current_labels):
         success = await _write_labels_with_retry(
-            conversation_id, run_id, conv.chatwoot_conversation_id, resolved
+            conversation_id, run_id, conv.chatwoot_conversation_id, final_labels
         )
         if not success:
             await queries.update_tagassigner_run_failed(run_id)
@@ -169,26 +196,22 @@ async def apply_resolved_labels(
             conversation_id,
         )
 
-    # Step 6: deterministic attribute writes (university / ogrenci_cinsiyet / ilgili_otel)
-    # newest_evidence_at: latest message timestamp as the Option A comparison point
-    newest_evidence_at = await _newest_message_at(conversation_id)
-    attr_ok = await resolve_and_write_attributes(
-        conversation_id=conversation_id,
-        chatwoot_conversation_id=conv.chatwoot_conversation_id,
-        run_id=run_id,
-        newest_ilgili_otel_evidence_at=newest_evidence_at,
-    )
-
-    if not attr_ok:
-        logger.error(
-            "TagAssigner router: attribute write failed for conversation %s", conversation_id
+    if merge_result.chatwoot_patches:
+        record_self_write(conv.chatwoot_conversation_id)
+        attr_ok = await push_chatwoot_attribute_patches(
+            conv.chatwoot_conversation_id,
+            merge_result.chatwoot_patches,
         )
-        await queries.update_tagassigner_run_failed(run_id)
-        return False
+        if not attr_ok:
+            await queries.update_tagassigner_run_failed(run_id)
+            return False
+        await _log(run_id, conversation_id, "api", "router", "chatwoot", True, "200")
 
-    # Step 7: reset message counter + mark success
     await queries.reset_tagassigner_run_counts(conversation_id)
-    await queries.update_tagassigner_run_success(run_id, {"labels": proposed_labels})
+    await queries.update_tagassigner_run_success(
+        run_id,
+        {"labels": result.labels, "attributes": result.attributes},
+    )
 
     logger.info(
         "TagAssigner router: run %s completed for conversation %s",
@@ -197,21 +220,69 @@ async def apply_resolved_labels(
     return True
 
 
+async def apply_resolved_labels(
+    conversation_id: uuid.UUID,
+    run_id: uuid.UUID,
+    proposed_labels: list[str],
+    current_labels: Optional[list[str]] = None,
+) -> bool:
+    """Backward-compatible entry for callers that only have labels (no attributes)."""
+    conv = await queries.get_conversation_by_id(conversation_id)
+    if not conv:
+        return False
+    uni = await _university_display_for_conv(conv) or "bilinmiyor"
+    gender_disp = gender_enum_to_display(conv.gender) if conv.gender else "bilinmiyor"
+    return await apply_tagassigner_result(
+        conversation_id,
+        run_id,
+        GeminiTagResult(
+            labels=proposed_labels,
+            attributes={
+                "university": uni,
+                "ogrenci_cinsiyet": gender_disp,
+                "oda_tiipi": conv.oda_tiipi or "boş",
+            },
+        ),
+        current_labels=current_labels,
+    )
+
+
+def _gemini_result_from_dict(data: dict) -> Optional[GeminiTagResult]:
+    labels = data.get("labels")
+    if not isinstance(labels, list):
+        return None
+    attributes = data.get("attributes")
+    if isinstance(attributes, dict):
+        return GeminiTagResult(
+            labels=[str(l) for l in labels if isinstance(l, str)],
+            attributes={str(k): str(v) for k, v in attributes.items()},
+        )
+    # Legacy runs: labels only — echo current state is unsafe; use sentinels (no-op merge)
+    return GeminiTagResult(
+        labels=[str(l) for l in labels if isinstance(l, str)],
+        attributes={
+            "university": "bilinmiyor",
+            "ogrenci_cinsiyet": "bilinmiyor",
+            "oda_tiipi": "boş",
+        },
+    )
+
+
+async def _university_display_for_conv(conv: Conversation) -> Optional[str]:
+    if not conv.university_id:
+        return None
+    return await queries.get_chatwoot_list_value_for_university(conv.university_id)
+
+
 async def _write_labels_with_retry(
     conversation_id: uuid.UUID,
     run_id: uuid.UUID,
     chatwoot_conversation_id: int,
     labels: list[str],
 ) -> bool:
-    """
-    Write the full label set to Chatwoot with exponential backoff retry.
-    Records self-write before each attempt (feedback-loop guard).
-    Retryable: 5xx / timeout. Non-retryable: 4xx → straight to fatal.
-    """
     last_error: Optional[str] = None
 
     for attempt, delay in enumerate(_WRITEBACK_DELAYS, start=1):
-        # Record self-write BEFORE the call for the feedback-loop guard (§6.5)
         record_self_write(chatwoot_conversation_id)
 
         result = await set_labels(chatwoot_conversation_id, labels)
@@ -251,7 +322,6 @@ async def _write_labels_with_retry(
 
 
 async def _get_last_successful_run(conversation_id: uuid.UUID):
-    """Return the most recent successful run for this conversation, or None."""
     pool = queries.get_pool()
     row = await pool.fetchrow(
         """
@@ -265,20 +335,10 @@ async def _get_last_successful_run(conversation_id: uuid.UUID):
     if not row:
         return None
     from app.db.models import TagAssignerRun
-    import json
     data = dict(row)
     if data.get("gemini_result") and isinstance(data["gemini_result"], str):
         data["gemini_result"] = json.loads(data["gemini_result"])
     return TagAssignerRun(**data)
-
-
-async def _newest_message_at(conversation_id: uuid.UUID) -> Optional[datetime]:
-    pool = queries.get_pool()
-    row = await pool.fetchrow(
-        "SELECT MAX(created_at) AS newest FROM messages WHERE conversation_id = $1 AND is_private = false",
-        conversation_id,
-    )
-    return row["newest"] if row else None
 
 
 async def _log(

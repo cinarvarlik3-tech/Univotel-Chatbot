@@ -44,10 +44,15 @@ def test_internal_secret_missing():
 async def test_chatwoot_hmac_valid():
     secret = "test_secret"
     body = b'{"event":"message_created"}'
-    sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    timestamp = "1700000000"
+    signed_payload = timestamp.encode() + b"." + body
+    digest = hmac.new(secret.encode(), signed_payload, hashlib.sha256).hexdigest()
 
     mock_request = AsyncMock()
-    mock_request.headers = {"X-Chatwoot-Signature": sig}
+    mock_request.headers = {
+        "X-Chatwoot-Timestamp": timestamp,
+        "X-Chatwoot-Signature": f"sha256={digest}",
+    }
     mock_request.body = AsyncMock(return_value=body)
 
     with patch("app.security.settings") as mock_settings:
@@ -60,9 +65,13 @@ async def test_chatwoot_hmac_valid():
 async def test_chatwoot_hmac_invalid():
     secret = "test_secret"
     body = b'{"event":"message_created"}'
+    timestamp = "1700000000"
 
     mock_request = AsyncMock()
-    mock_request.headers = {"X-Chatwoot-Signature": "bad_sig"}
+    mock_request.headers = {
+        "X-Chatwoot-Timestamp": timestamp,
+        "X-Chatwoot-Signature": "sha256=bad_sig",
+    }
     mock_request.body = AsyncMock(return_value=body)
 
     with patch("app.security.settings") as mock_settings:

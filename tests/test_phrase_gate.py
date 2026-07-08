@@ -106,3 +106,47 @@ def test_phrase_gate_entity_filter2():
     )
     assert result.action == PhraseGateAction.GREETING
     assert result.reason == "filter2_entity"
+
+
+def test_phrase_gate_sa_greeting_variant():
+    result = evaluate_phrase_gate(
+        "sa",
+        is_first_inbound=True,
+        hotels=[],
+        universities=[],
+        aliases=[],
+    )
+    assert result.action == PhraseGateAction.GREETING
+
+
+def test_phrase_gate_slm_greeting_variant():
+    result = evaluate_phrase_gate(
+        "slm",
+        is_first_inbound=True,
+        hotels=[],
+        universities=[],
+        aliases=[],
+    )
+    assert result.action == PhraseGateAction.GREETING
+
+
+def test_phrase_gate_heyy_greeting_variant():
+    result = evaluate_phrase_gate(
+        "Heyy",
+        is_first_inbound=True,
+        hotels=[],
+        universities=[],
+        aliases=[],
+    )
+    assert result.action == PhraseGateAction.GREETING
+
+
+def test_phrase_gate_sa_substring_in_masa_not_matched():
+    result = evaluate_phrase_gate(
+        "masa",
+        is_first_inbound=True,
+        hotels=[],
+        universities=[],
+        aliases=[],
+    )
+    assert result.action == PhraseGateAction.IGNORE

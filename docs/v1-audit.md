@@ -13,8 +13,7 @@ This document consolidates everything that failed or is still open before callin
 
 | ID | Step | Input / scenario | Result | Notes |
 |---|---|---|---|---|
-| **F6** | 2 | `taşkışla` → should resolve directly to İTÜ Maçka (campus-level alias, no escalation) | **FAIL** | Direct campus alias did not map; escalation fallback also failed. Blocker per test plan exit criteria. |
-| **F8** | 3 | After İTÜ campus question, lead replies `Beşiktaş` (not a valid campus) | **FAIL** | Conversation freezes from the lead’s perspective — no bot reply. Code may set `human_needed` internally, but there is no user-visible message. |
+| **F6** | 2 | `taşkışla` → should resolve directly to İTÜ Maçka (campus-level alias, no escalation) | **FAIL** | Direct campus alias did33ries `Beşiktaş` (not a valid campus) | **FAIL** | Conversation freezes from the lead’s perspective — no bot reply. Code may set `human_needed` internally, but there is no user-visible message. |
 
 ### 1.2 Phrase-gate failures (blocked step 1 across most tests)
 
@@ -189,7 +188,7 @@ From the lead’s perspective: message sent, no reply, conversation appears dead
 ### 3.5 Recommended directions (pick one before go-live)
 
 1. **Minimum viable expansion** — Accept case-insensitive: `merhaba`, `selam`, `merhabalar`, `hello`, plus keyword triggers: `yurt`, `konaklama`, `üniversite`, `basvuru` / `başvuru` without requiring exact punctuation.
-2. **Two-tier gate** — Soft opener → send `hangi` (university ask) instead of `human_needed`; hard gate only for clearly irrelevant traffic (optional).
+2. **Two-tier gate** — Soft opener → send `hangi` (university ask) instead of `human_needed`; hard gate only for clearly irrelevant traffic (optional). **Partially implemented:** off-script detection in `awaiting_university` via `answer_classifier.py` (FallBack V2 seam: `internal_class=off_script_no_answer`).
 3. **Gate only on first message** — If `flow_state = new`, accept any non-empty text and proceed to university capture (simplest; review spam risk).
 4. **Keep strict gate** — Only viable if **100% of production traffic** is guaranteed to use pre-filled link messages; document and enforce at marketing/website layer.
 

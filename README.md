@@ -6,30 +6,63 @@ This README is the primary onboarding document for engineers new to the project.
 
 ---
 
+## Current Project Stage (July 2026)
+
+**Deployment:** Single Railway web process, `TESTING_LIMITATIONS_MODE` on (2-phone allowlist). Chatwoot webhooks → InfoGatherer → RecEngine → canned hotel responses; TagAssigner runs in parallel via queue/idle scan.
+
+| Area | Status | Notes |
+|------|--------|-------|
+| **InfoGatherer** | Shipped | Phrase gate, matching, campus escalation, gender capture, two-strike clarify, out-of-city path |
+| **Answer-vs-off-script** | Shipped | `answer_classifier.py` — silent `human_needed` for true off-script; clarify path for answer attempts ([O-suite](docs/wa_test_off_script_detection.md) passed live) |
+| **RecEngine** | Shipped | Gender + university → `priority_score` selection; retry ladder; deal_awaiting sentinels |
+| **TagAssigner (V1)** | Shipped in code | Router, label resolver, attribute merger, `info-check`, batch path (batch submit may be stubbed) |
+| **FallBack (V2)** | Not started | All “call FallBack” paths → silent `human_needed` today |
+| **Unit tests** | 198 passing | `pytest` — no CI wired yet |
+| **Live conversational tests** | F-suite + O-suite documented | [F1–F10](docs/wa_test_links.md), [O1–O10](docs/wa_test_off_script_detection.md) |
+
+### Blockers before production (`TESTING_LIMITATIONS_MODE=off`)
+
+1. **Migration 017** applied on ChatBot DB — without it, RecEngine callback fails on `ilgili_otel_set_by` CHECK (`conversations_ilgili_otel_set_by_check`). Migrations 015–016 also required for out-of-city and deal_awaiting label sentinel.
+2. **Suite A & B** — hotel data-state audit + alias collision script exit 0.
+3. **Integrity check** clean boot with `INTEGRITY_CHECK_BYPASS=off`.
+4. **Product decisions** — see [Known Issues & Open Decisions](#known-issues--open-decisions) (RecEngine geography, national uni list, business-digression handling).
+
+### Recently completed (July 2026)
+
+- Multi-filter **phrase gate** (fixes F-suite step-1 greeting failures).
+- **Invalid-input two-strike** for university/campus (`clarification_attempt`, migration 014).
+- **Out-of-city universities** table + `/istanbul` terminal path (migration 015).
+- **Answer classifier** — distinguishes slot-filling attempts from off-script questions mid-flow.
+- **TagAssigner attributes spec 018** — `set_by` companions, attribute merger, Router-owned `info-check` label.
+
+---
+
 ## Table of Contents
 
 1. [What This System Does](#what-this-system-does)
-2. [Tech Stack](#tech-stack)
-3. [Architecture Overview](#architecture-overview)
-4. [Quick Start](#quick-start)
-5. [Environment Variables](#environment-variables)
-6. [Project Structure](#project-structure)
-7. [HTTP API & Webhooks](#http-api--webhooks)
-8. [Layer 1: InfoGatherer](#layer-1-infogatherer)
-9. [Layer 2: RecEngine](#layer-2-recengine)
-10. [University Matching](#university-matching)
-11. [Layer 3: TagAssigner (V1)](#layer-3-tagassigner-v1)
-12. [Layer 4: FallBack (V2 — deferred)](#layer-4-fallback-v2--deferred)
-13. [Database](#database)
-14. [Migrations](#migrations)
-15. [Background Jobs & Schedules](#background-jobs--schedules)
-16. [Security](#security)
-17. [Chatwoot Integration](#chatwoot-integration)
-18. [Testing](#testing)
-19. [Deployment](#deployment)
-20. [Production Readiness](#production-readiness)
-21. [Known Issues & Open Decisions](#known-issues--open-decisions)
-22. [Documentation Index](#documentation-index)
+2. [Current Project Stage (July 2026)](#current-project-stage-july-2026)
+3. [Tech Stack](#tech-stack)
+4. [Architecture Overview](#architecture-overview)
+5. [Quick Start](#quick-start)
+6. [Environment Variables](#environment-variables)
+7. [Project Structure](#project-structure)
+8. [HTTP API & Webhooks](#http-api--webhooks)
+9. [Layer 1: InfoGatherer](#layer-1-infogatherer)
+10. [Layer 2: RecEngine](#layer-2-recengine)
+11. [University Matching](#university-matching)
+12. [Layer 3: TagAssigner (V1)](#layer-3-tagassigner-v1)
+13. [Layer 4: FallBack (V2 — deferred)](#layer-4-fallback-v2--deferred)
+14. [Database](#database)
+15. [Migrations](#migrations)
+16. [Background Jobs & Schedules](#background-jobs--schedules)
+17. [Security](#security)
+18. [Chatwoot Integration](#chatwoot-integration)
+19. [Testing](#testing)
+20. [Deployment](#deployment)
+21. [Production Readiness](#production-readiness)
+22. [Known Issues & Open Decisions](#known-issues--open-decisions)
+23. [Documentation Index](#documentation-index)
+24. [Contributing](#contributing)
 
 ---
 
@@ -51,11 +84,13 @@ Univotel's Chatwoot inbox receives high-volume, repetitive leads: a student mess
 | Send ordered canned property messages | InfoGatherer + `response_schemas` |
 | Assign CRM labels and attributes from chat | TagAssigner (Gemini) |
 | Hand off edge cases | `human_needed` escalation (FallBack in V2) |
+| Detect off-script replies mid slot-fill | `answer_classifier.py` → silent handoff (no bot message) |
 
-### What it deliberately does **not** do
+### What it deliberately does **not** do (yet)
 
-- General conversation or free-text intent routing (deferred to FallBack V2)
-- Post-completion "show me something else" without naming a hotel
+- Full LLM conversation recovery (FallBack V2 — today → silent `human_needed`)
+- Scripted responses for **business digressions** mid-flow (e.g. “konaklama arıyorum”, “fiyat bilgisi alabilir miyim” after university ask — currently same silent handoff as location questions; see open decision)
+- Post-completion “show me something else” without naming a hotel
 - Sales-action labels (`aranacak`, `arandi`, etc.) — not chat-observable until V2
 - Data deletion (KVKK: indefinite retention by policy)
 
@@ -63,7 +98,7 @@ Univotel's Chatwoot inbox receives high-volume, repetitive leads: a student mess
 
 | Layer | Module(s) | Status | Role |
 |-------|-----------|--------|------|
-| **InfoGatherer** | `app/layers/info_gatherer.py` | Production | Scripted state machine: phrase gate → university → gender → trigger RecEngine → send canned responses |
+| **InfoGatherer** | `info_gatherer.py`, `phrase_gate.py`, `answer_classifier.py`, `matching.py` | Production | Scripted state machine + first-message gate + off-script detection |
 | **RecEngine** | `app/layers/rec_engine.py` | Production | Filter hotels by gender + university; tie-break by `priority_score` |
 | **TagAssigner** | `app/tagassigner/*` | Production (V1) | Gemini proposes labels; router resolves conflicts and writes labels + attributes |
 | **FallBack** | Not implemented | Deferred (V2) | LLM recovery for off-script cases; today → `human_needed` |
@@ -105,7 +140,9 @@ Student WhatsApp message
   → Chatwoot
   → POST /webhooks/chatwoot (HMAC verify, dedupe, upsert conversation)
   → InfoGatherer state machine (background)
+      → phrase_gate (first message only)
       → matching.py (university)
+      → answer_classifier.py (off-script vs answer attempt, awaiting_university only)
       → canned responses OR campus question OR gender prompt
   → RecEngine (gender + university → hotel)
       → POST /internal/infogatherer/callback
@@ -178,7 +215,7 @@ cp .env.example .env
 # Edit .env with real values (see Environment Variables below)
 
 # 5. Apply migrations (manual — see Migrations section)
-# Run migrations/001 through migrations/014 in order via Supabase SQL editor.
+# Run migrations/001 through migrations/017 in order via Supabase SQL editor.
 # Also apply external seed files referenced in docs (parent universities, label maps).
 
 # 6. Run the server
@@ -192,7 +229,7 @@ curl http://localhost:8000/health
 ### First-run checklist
 
 - [ ] `DATABASE_URL` points to the ChatBot Supabase project
-- [ ] Migrations 001–014 applied; migrations 013 and 014 confirmed on production-like DB
+- [ ] Migrations **001–017** applied (especially **013**, **014**, **015**, **016**, **017** on production-like DB)
 - [ ] `INTEGRITY_CHECK_BYPASS=false` for a real boot test (app should start cleanly)
 - [ ] `TESTING_LIMITATIONS_MODE=true` until production sign-off
 - [ ] Chatwoot webhook URL points to your deployment's `/webhooks/chatwoot`
@@ -201,14 +238,14 @@ curl http://localhost:8000/health
 ### Running tests
 
 ```bash
-# Unit tests only (default — integration tests excluded)
+# Unit tests (198 tests; integration marker exists but no integration tests checked in)
 pytest
 
-# Include integration tests (requires live DATABASE_URL)
+# Include integration tests when added (requires live DATABASE_URL)
 pytest -m integration
 
 # Run a specific module
-pytest tests/test_matching.py -v
+pytest tests/test_matching.py tests/test_answer_classifier.py -v
 ```
 
 ---
@@ -274,9 +311,10 @@ Univotel Chatbot/
 │   │   └── batch_results.py         # POST /webhooks/batch-results — Gemini batch callback
 │   ├── layers/
 │   │   ├── info_gatherer.py         # ContextRun state machine
+│   │   ├── answer_classifier.py     # Answer-vs-off-script after failed uni match
 │   │   ├── phrase_gate.py           # First-message gate (7 filters + pre-conditions A/B)
 │   │   ├── rec_engine.py            # Hotel selection by gender + university
-│   │   └── matching.py              # University matching (exact → alias → Levenshtein)
+│   │   └── matching.py              # University matching + near-miss helper
 │   ├── background/
 │   │   ├── rec_engine_ladder.py     # 3×5s retry ladder for RecEngine
 │   │   ├── send_retry.py            # Chatwoot send retry (1s/2s/4s backoff)
@@ -288,13 +326,17 @@ Univotel Chatbot/
 │       ├── trigger.py               # Idle scan, midnight reset, nightly batch sweeps
 │       ├── queue.py                 # Durable Postgres queue drain worker
 │       ├── gemini_client.py         # Live Gemini API calls
+│       ├── gemini_types.py          # Typed Gemini request/response shapes
 │       ├── batch_client.py          # Nightly Gemini Batch API + GCS fetch
 │       ├── payload_builder.py       # Builds Gemini prompt payload
 │       ├── label_resolver.py        # 4-list taxonomy enforcement
-│       ├── attribute_resolver.py    # Deterministic Chatwoot attribute writes
+│       ├── attribute_resolver.py    # InfoGatherer completion writes + Chatwoot push
+│       ├── attribute_merger.py      # Merge Gemini attributes vs DB/human (spec 018)
+│       ├── attribute_helpers.py     # Shared attribute normalization helpers
+│       ├── info_check.py            # Router-owned info-check label logic
 │       └── conflict.py              # Option-A timestamp conflict rule for ilgili_otel
-├── migrations/                      # 14 SQL migrations (001–014), applied manually
-├── tests/                           # Unit tests (8 modules + conftest)
+├── migrations/                      # 17 SQL migrations (001–017), applied manually
+├── tests/                           # 14 unit test modules (~198 tests)
 ├── docs/                            # Specs, audits, test plans, SQL audit scripts
 ├── system_prompts/
 │   └── tagassigner_prompt.md        # Gemini system prompt for TagAssigner
@@ -313,12 +355,14 @@ Univotel Chatbot/
 | `app/main.py` | App entry, lifespan, all background task startup |
 | `app/layers/info_gatherer.py` | Core business logic — state machine |
 | `app/layers/phrase_gate.py` | First-inbound phrase gate — 7 filters + pre-conditions |
+| `app/layers/answer_classifier.py` | Answer-vs-off-script detection after failed university match |
 | `app/db/queries.py` | Every database operation |
 | `app/webhooks/chatwoot.py` | Inbound message handling, dedupe, testing gate |
 | `app/tagassigner/router.py` | TagAssigner pipeline orchestration |
 | `docs/univotel-chatbot-spec.md` | V0 master spec |
 | `docs/chatbot-phrase-gate-and-matching-spec.md` | Phrase gate, clarification, matching spec |
-| `docs/matching-fixes-impl-spec.md` | Pending matching/clarification fixes (F6, F8) |
+| `docs/matching-fixes-impl-spec.md` | Matching/clarification fixes (implemented July 2026) |
+| `docs/018_tagassigner_attributes_info_check_spec.md` | TagAssigner attributes, set_by, info-check |
 | `docs/tagassigner-v1-spec.md` | V1 TagAssigner spec |
 | `docs/v1-audit.md` | Production readiness audit |
 
@@ -440,11 +484,38 @@ InfoGatherer is a **finite state machine** with optimistic locking via `update_c
 
 Once `university_id` and `gender` are confirmed → fire RecEngine (state → `recengine_running`).
 
+### Answer-vs-off-script classifier (`answer_classifier.py`)
+
+Runs **only** in `awaiting_university`, **after** `match_university()` and `match_out_of_city()` both return no match. Matching hierarchy is unchanged — the classifier never runs when a university resolves.
+
+**Decision order** (biased toward not treating off-script as bad university names):
+
+1. **Off-script markers** → silent `human_needed` (`internal_class=off_script_no_answer`, no Chatwoot message): WH-words, request verbs (`arıyorum`, `alabilir miyim`), third-person referents (`kızım`), question clitics, trailing `?`
+2. **Near-miss typo** (`is_near_miss_university` in `matching.py`) → answer attempt → two-strike clarify
+3. **Short reply** (≤2 tokens after normalize) → answer attempt
+4. **Education vocabulary** (`üniversite`, `fakülte`, …) → answer attempt (long fake uni names)
+5. **Otherwise** (long rambling, no answer shape) → silent handoff
+
+**Gender path:** Non-matching replies in `awaiting_gender` → immediate silent handoff (same `internal_class`). No reprompt.
+
+**Not wired in:** `awaiting_university_clarification`, `awaiting_campus_clarification` (existing two-strike behavior unchanged).
+
+**FallBack V2 seam:** `off_script_no_answer` escalation is the single hook for future LLM recovery.
+
+Live validation: [`docs/wa_test_off_script_detection.md`](docs/wa_test_off_script_detection.md) (O1–O10, all passed July 2026).
+
 ### Invalid input handling (`awaiting_university`, `awaiting_university_clarification`, `awaiting_campus_clarification`)
 
 Requires migration **014** (`clarification_attempt` column + `clarify_*` canned responses).
 
 **University not matched** (`awaiting_university` or `awaiting_university_clarification`):
+
+After `match_university()` and `match_out_of_city()` both fail in `awaiting_university`, `classify_university_reply()` (`app/layers/answer_classifier.py`) splits the reply:
+
+| Classification | Behavior |
+|----------------|----------|
+| **Not an answer** (WH-question, request verb, third-person referent, `?`, or long rambling text with no education anchor) | Silent `_escalate_human_needed()` immediately — `internal_class=off_script_no_answer`, no Chatwoot message |
+| **Answer attempt** (near-miss typo, ≤2 words, or education vocabulary such as `university`/`üniversite`) | Existing two-strike clarify path below |
 
 | Attempt | Behavior |
 |---------|----------|
@@ -462,7 +533,7 @@ Requires migration **014** (`clarification_attempt` column + `clarify_*` canned 
 
 `clarification_attempt` resets on any successful university or campus match. Campus matching compares `campus_label` and campus-scoped aliases from `university_aliases` (e.g. `taşkışla` → İTÜ Maçka during campus clarification).
 
-**Gender not matched** (`awaiting_gender`): Silent `human_needed`.
+**Gender not matched** (`awaiting_gender`): Silent `human_needed` (`internal_class=off_script_no_answer`).
 
 ### `deal_awaiting` path (post-RecEngine)
 
@@ -601,6 +672,10 @@ normalize(text)     # lowercase, strip Turkish diacritics, strip university suff
 
 **N-gram helpers:** `tokenize()`, `scan_ngrams()`, `scan_entities_by_ngram()`, `match_hotel_by_ngram()`, and `word_count_after_normalize()` support phrase-gate entity detection, hotel-name paths, and invalid-input word-count logic.
 
+**Near-miss band:** `is_near_miss_university()` — typos beyond the accept cutoff but within `NEAR_MISS_BAND` (default 2) extra edits; used by answer classifier only.
+
+**Out-of-city:** After Istanbul match fails, `match_out_of_city()` scans `out_of_city_universities` (migration 015) → send `istanbul` canned, state → `completed`.
+
 **Empty input:** Whitespace-only after normalization = no-match (same as zero hits).
 
 ---
@@ -615,29 +690,44 @@ TagAssigner reads conversations and assigns Chatwoot labels. It uses a **three-l
 2. **Script Router** (`router.py`) — all I/O brokering
 3. **Gemini** — classification only; never touches DB or Chatwoot
 
-**Gemini's entire output surface is labels.** Custom attributes are written deterministically by the Router.
+**Gemini proposes labels and bot-writable attributes; the Router merges, persists to DB, and pushes to Chatwoot.** See `docs/018_tagassigner_attributes_info_check_spec.md`.
 
 ### Router pipeline (`run_tagging`)
 
 ```
-1. Read current labels LIVE from Chatwoot (not DB replica)
-2. Fetch messages (full history for manual/scheduled; since-last-run for message trigger)
-3. payload_builder.build_payload → gemini_client.call_gemini
-4. label_resolver.resolve_labels (4-list taxonomy)
-5. Write labels to Chatwoot (full-set replace) with retry + record_self_write
-6. attribute_resolver.resolve_and_write_attributes
-7. Reset message counter; mark run success
+DB → Router → Gemini → Router → DB → Chatwoot
+
+1. Read current labels LIVE from Chatwoot
+2. Fetch messages; build payload from DB state
+3. gemini_client.call_gemini → labels + attributes snapshot
+4. label_resolver.resolve_labels (strip Gemini info-check first)
+5. attribute_merger.merge_attributes → DB updates + blocked mismatches
+6. info_check.apply_info_check → add/remove info-check label (Router-owned)
+7. Write labels + changed attribute keys to Chatwoot (record_self_write)
+8. Reset message counter; mark run success
 ```
 
-### Deterministic attribute writes (Router, not Gemini)
+### Field ownership (custom attributes)
 
-| Attribute | Source |
-|-----------|--------|
-| `university` | `universities.name` from InfoGatherer's `university_id` |
-| `ogrenci_cinsiyet` | `male → Erkek`, `female → Kız`, unset → `Bilinmiyor` |
-| `ilgili_otel` | `hotel_chatwoot_label_map` lookup from RecEngine hotel; Option A conflict rule |
+| Field | Bot may write? | Primary writer |
+|-------|----------------|----------------|
+| `university`, `ogrenci_cinsiyet` | TagAssigner — mismatch fix / add-if-missing | InfoGatherer |
+| `oda_tiipi` | TagAssigner — explicit chat only, add-if-missing | TagAssigner |
+| `ilgili_otel` | InfoGatherer only (RecEngine callback) | InfoGatherer |
+| `tasinma_tarihi`, `butce`, `kayip_nedeni` | Human CRM only | Sales |
 
-InfoGatherer also writes these three attributes immediately at flow completion (`write_attributes_at_flow_completion` on RecEngine callback). TagAssigner maintains them on subsequent runs.
+Human-set fields use `*_set_by = 'human'` companions; the Router never overrides them.
+
+### `info-check` label
+
+Router-owned (Gemini must never assign it). Added when chat conflicts with DB/labels but the Router **cannot** fix (e.g. human-set field).
+
+- **Auto-expires after 48 hours** if a salesperson has not cleared it — intentional stale-flag cleanup, not proof the mismatch was resolved.
+- If a human removes the label, the bot will not re-add it for the **same** mismatch fingerprint unless a **different** conflict appears.
+
+### InfoGatherer attribute writes
+
+At RecEngine callback, `write_attributes_at_flow_completion` writes `university`, `ogrenci_cinsiyet`, and `ilgili_otel` to Chatwoot with `set_by=infoGatherer`. TagAssigner does **not** write `ilgili_otel`.
 
 ### Option A — timestamp conflict rule
 
@@ -676,7 +766,7 @@ Enforced by `label_resolver.py` regardless of prompt content:
 
 **LIST 1 — USABLE** (add and remove freely):
 
-`pre-sinav`, `hazırlık`, `1-sinif`, `2-sinif`, `3-sinif`, `4-sinif`, `universitede`, `yerlesti`, `yeni-giris`, `erasmus`, `ogrenci`, `veli`, `ogrenci-degil`, `kyk-sonuc-bekliyor`, `ibb-yurdu-sonuc-bekliyor`, `universite-yurdu-sonuc-bekliyor`, `yatay_geçiş_bekliyor`, `univotelli`, `fiyat-soruyor`, `ilgilenmiyor`, `ziyaret`, `ziyaret-etti`, `ziyaret-etmedi`
+`pre-sinav`, `hazırlık`, `1-sinif`, `2-sinif`, `3-sinif`, `4-sinif`, `universitede`, `yerlesti`, `yeni-giris`, `erasmus`, `ogrenci`, `veli`, `ogrenci-degil`, `kyk-sonuc-bekliyor`, `ibb-yurdu-sonuc-bekliyor`, `universite-yurdu-sonuc-bekliyor`, `yatay_geçiş_bekliyor`, `univotelli`, `fiyat-soruyor`, `ilgilenmiyor`, `ziyaret`, `ziyaret-etti`, `ziyaret-etmedi`, `info-check` (Router-owned lifecycle; Gemini preserves if present but must not assign)
 
 **LIST 2 — ADD-ONLY / NEVER REMOVE** (hard Router guard):
 
@@ -765,11 +855,12 @@ V2 will also unlock sales-action labels (`aranacak`, `arandi`, etc.) via NetGSM/
 | `response_schemas` | Ordered message sequences per hotel |
 | `university_aliases` | Normalized abbreviations for matching |
 
-**Tier C — Deal-awaiting** (migration 006):
+**Tier C — Deal-awaiting & out-of-city** (migrations 006, 015, 016):
 
 | Table | Purpose |
 |-------|---------|
 | `deal_awaiting_universities` | Istanbul schools with deals in progress (ops list for Chatwoot label on NULL) |
+| `out_of_city_universities` | National universities outside Istanbul service area (148-row seed) |
 
 **Tier D — TagAssigner** (migrations 007–010):
 
@@ -799,7 +890,9 @@ V2 will also unlock sales-action labels (`aranacak`, `arandi`, etc.) via NetGSM/
 | `messages_since_last_run` | TagAssigner 5-message gate |
 | `auto_run_count`, `manual_run_count` | Daily run caps (reset at Istanbul midnight) |
 | `ilgili_otel`, `ilgili_otel_set_at`, `ilgili_otel_set_by` | Conflict-managed attribute |
-| `tasinma_tarihi`, `kayip_nedeni`, `oda_tiipi`, `butce` | Manual attributes (Gemini context) |
+| `university_set_by/at`, `gender_set_by/at`, `oda_tiipi_set_by/at` | Human-set protection (spec 018) |
+| `info_check_fingerprint`, `info_check_added_at`, `info_check_suppressed_fingerprint` | Router info-check state |
+| `tasinma_tarihi`, `kayip_nedeni`, `oda_tiipi`, `butce` | CRM attributes |
 | `pending_parent_university_id` | Campus escalation in progress |
 | `clarification_attempt` | Invalid campus reply retry counter (migration 014; reset on successful match) |
 | `reprompt_count`, `last_reprompt_sent_at` | Abandonment ladder |
@@ -822,7 +915,9 @@ conversations → messages, rec_engine_logs, tag_assigner_runs, tag_assigner_que
 
 ## Migrations
 
-Migrations live in `migrations/` (001–014). **There is no automated migration runner** — apply manually via the Supabase SQL editor. Write migrations idempotently (`IF NOT EXISTS`) where possible.
+Migrations live in `migrations/` (001–017). **There is no automated migration runner** — apply manually via the Supabase SQL editor. Write migrations idempotently (`IF NOT EXISTS`) where possible.
+
+**Recommended apply order:** 001 → 017 sequentially. Migrations 016–017 were added after the original 001–014 sequence; do not skip them on production.
 
 | # | File | Changes |
 |---|------|---------|
@@ -832,7 +927,6 @@ Migrations live in `migrations/` (001–014). **There is no automated migration 
 | 004 | `004_create_university_aliases.sql` | Alias table (redundant on fresh DB) |
 | 005 | `005_add_contact_phone_to_conversations.sql` | `contact_phone` for testing filter |
 | 006 | `006_deal_awaiting.sql` | `deal_awaiting_universities` + DEAL-AWAITING-STATE sentinel |
-| 016 | `016_deal_awaiting_recengine.sql` | DEAL-AWAITING-LABEL-STATE sentinel + RecEngine wiring |
 | 007 | `007_tagassigner_runs_and_logs.sql` | TagAssigner run tracking |
 | 008 | `008_conversations_columns.sql` | `last_message_at`, run counters, attribute columns |
 | 009 | `009_hotel_chatwoot_label_map.sql` | Hotel → Chatwoot label mapping |
@@ -840,7 +934,10 @@ Migrations live in `migrations/` (001–014). **There is no automated migration 
 | 011 | `011_parent_university_escalation.sql` | Parent universities, campus maps, label maps |
 | 012 | `012_fix3_orphan_universities.sql` | Data fix: Doğuş Kadıköy, Arel cleanup |
 | 013 | `013_escalation_schema_fixes.sql` | `awaiting_campus_clarification` in CHECK; missed 011 fixes |
-| 014 | `014_phrase_gate_and_clarification.sql` | `clarification_attempt` column; `clarify_*` canned responses |
+| 014 | `014_phrase_gate_and_clarification.sql` | `clarification_attempt`; `clarify_*` canned responses |
+| 015 | `015_out_of_city_universities.sql` | `out_of_city_universities` table + 148-row seed |
+| 016 | `016_deal_awaiting_recengine.sql` | DEAL-AWAITING-LABEL-STATE sentinel + RecEngine wiring |
+| 017 | `017_tagassigner_attributes.sql` | `university/gender/oda_tiipi_set_by`, info-check state columns |
 
 ### External seed files (referenced, may not be in repo)
 
@@ -850,13 +947,16 @@ Apply separately in Supabase:
 - `session_migration.sql` — `parent_universities` + `university_parent_map`
 - `university_map_seed.sql` — 92 `university_chatwoot_label_map` rows
 
-### Pre-flight before RecEngine
+### Pre-flight before go-live
 
-- Migration 002 applied **and** every hotel's `gender_scope` manually verified
-- Migration 003 applied (GLOBAL-NULL-STATE exists and is wired)
-- Migration 006 applied (DEAL-AWAITING-STATE exists and is wired)
-- Migration 013 applied on production (confirms `awaiting_campus_clarification` constraint)
-- Migration 014 applied (`clarification_attempt` column; `clarify_uni`, `clarify_uni_name`, `clarify_campus_name` canned responses)
+- Migrations **001–017** applied on ChatBot DB
+- Migration 002: every hotel's `gender_scope` manually verified
+- Migration 003: GLOBAL-NULL-STATE exists and is wired
+- Migration 006 + 016: DEAL-AWAITING sentinels wired
+- Migration 013: `awaiting_campus_clarification` constraint on production
+- Migration 014: `clarify_uni`, `clarify_uni_name`, `clarify_campus_name` canned responses
+- Migration 015: `out_of_city_universities` populated
+- Migration 017: `*_set_by` CHECK constraints + info-check columns (required for RecEngine callback attribute writes)
 
 ---
 
@@ -943,21 +1043,26 @@ Auth: `api_access_token: CHATWOOT_API_TOKEN`, 10s timeout.
 
 ## Testing
 
-### Test suite
+### Test suite (198 tests, `pytest`)
 
 | File | Covers |
 |------|--------|
-| `tests/test_matching.py` | University matching algorithm, n-gram helpers, alias normalization |
+| `tests/test_matching.py` | University matching, n-gram helpers, near-miss, alias normalization |
 | `tests/test_phrase_gate.py` | Phrase gate filters and pre-conditions |
-| `tests/test_info_gatherer.py` | InfoGatherer extraction helpers (`_extract_university_candidate`, gender regex) |
-| `tests/test_info_gatherer_handlers.py` | Invalid-input handlers (university/campus clarification, two-strike escalation) |
+| `tests/test_answer_classifier.py` | Answer-vs-off-script classification |
+| `tests/test_info_gatherer.py` | Extraction helpers (`_extract_university_candidate`, gender regex) |
+| `tests/test_info_gatherer_handlers.py` | Invalid-input handlers, off-script wiring, two-strike escalation |
+| `tests/test_rec_engine.py` | RecEngine hotel selection |
+| `tests/test_internal_callback.py` | InfoGatherer ↔ RecEngine callback |
 | `tests/test_security.py` | HMAC / secret verification |
 | `tests/test_testing_mode.py` | Phone allowlist behavior |
 | `tests/test_label_resolver.py` | TagAssigner label taxonomy |
 | `tests/test_conflict.py` | Option-A timestamp conflict rule |
 | `tests/test_payload_builder.py` | Gemini payload assembly |
+| `tests/test_attribute_merger.py` | Attribute merge + blocked mismatches (spec 018) |
+| `tests/test_info_check.py` | Router info-check label logic |
 
-The `@pytest.mark.integration` marker is configured in `pytest.ini`, but **no integration tests are checked in yet** — `pytest -m integration` currently selects nothing.
+The `@pytest.mark.integration` marker is configured in `pytest.ini`, but **no integration tests are checked in yet**.
 
 ### Pre-V1 audit suites
 
@@ -978,9 +1083,15 @@ python3 docs/alias_collision_check.py
 # Exit 0 = pass
 ```
 
-**Suite F — Functional conversational tests** (`docs/wa_test_links.md`):
+**Suite F — Functional conversational tests** ([`docs/wa_test_links.md`](docs/wa_test_links.md)):
 
-WhatsApp test links F1–F10 with pass/fail annotations. **Mandatory teardown between tests:**
+WhatsApp test links F1–F10. Phrase gate, matching, campus escalation, invalid-input flows.
+
+**Suite O — Off-script detection** ([`docs/wa_test_off_script_detection.md`](docs/wa_test_off_script_detection.md)):
+
+WhatsApp test links O1–O10. Answer classifier: silent handoff vs clarify path. **All passed live (July 2026).** Open product notes on O3/O4 (housing/price mid-flow) documented in that file.
+
+**Mandatory teardown between live tests:**
 
 ```sql
 UPDATE conversations
@@ -1034,70 +1145,114 @@ Failure → fatal log, app refuses to start (unless bypassed).
 
 ### Staged go-live sequence
 
-1. Run Suites A & B; fix every finding
-2. Implement matching-fixes spec (F6/F8); re-run F-suite + conv-52 smoke test with `INTEGRITY_CHECK_BYPASS=off`
-3. Widen allowlist → monitor logs → `TESTING_LIMITATIONS_MODE=off`
-4. Monitor first week: RecEngine candidate logs, integrity sweep, TagAssigner error rate
+1. Apply migrations **001–017** on production ChatBot DB; verify 017 (`*_set_by` columns exist)
+2. Run Suites A & B; fix every finding
+3. Run F-suite + O-suite on allowlisted test phones with `INTEGRITY_CHECK_BYPASS=off`
+4. Conv-52 smoke: `merhaba` → uni → campus (if parent) → gender → RecEngine → attributes in Chatwoot
+5. Widen allowlist → monitor logs → `TESTING_LIMITATIONS_MODE=off`
+6. Monitor first week: RecEngine candidate logs, integrity sweep, TagAssigner error rate, `off_script_no_answer` volume
 
 ---
 
 ## Production Readiness
 
-See `docs/v1-audit.md` for the full audit. Summary of blockers before turning off `TESTING_LIMITATIONS_MODE`:
+See [`docs/v1-audit.md`](docs/v1-audit.md) for the full audit. Summary before turning off `TESTING_LIMITATIONS_MODE`:
 
-### Must complete
+### Done (July 2026)
 
-- [ ] F6 pass — `taşkışla` → İTÜ Maçka direct (re-verify live after matching fixes)
-- [x] Phrase gate implemented — multi-filter gate in `phrase_gate.py` (natural greetings/housing/proximity pass)
-- [x] F8 — invalid campus/university two-strike behavior (clarify once, silent `human_needed` on second failure)
+- [x] Phrase gate — multi-filter first-inbound gate (`phrase_gate.py`)
+- [x] F8-style invalid campus/university two-strike (clarify once → silent `human_needed`)
+- [x] Campus alias lookup in `awaiting_campus_clarification` (F6 path)
+- [x] Dynamic Levenshtein cutoff (short-input false-positive fix, e.g. TÖÜ vs Koç)
+- [x] Out-of-city university path (migration 015)
+- [x] Answer-vs-off-script classifier + O-suite live pass
+- [x] TagAssigner attribute merger + info-check (spec 018, code complete)
+- [x] Unit test suite (198 tests passing locally)
+
+### Must complete before production
+
+- [ ] **Migration 017** on production DB (RecEngine callback currently fails without it)
+- [ ] Migrations 015–016 confirmed on production DB
 - [ ] Suite A (A1–A11) — zero rows on every check
 - [ ] Suite A12 — intended hotel at rank 1 for high-traffic campuses
 - [ ] Suite B — alias collision check exits 0
-- [ ] Migrations 013 and 014 applied on production DB
 - [ ] `INTEGRITY_CHECK_BYPASS=off` — clean boot
-- [ ] `deal_awaiting_msg` copy finalized
+- [ ] `deal_awaiting_msg` copy finalized (migration 006 seed still `<TODO>`)
 
 ### Strongly recommended
 
-- [ ] Conv-52 smoke test — `itü` → campus → gender → correct hotel → attributes in Chatwoot immediately
+- [ ] Conv-52 end-to-end smoke after migration 017 applied
 - [ ] Turkish label round-trip verified against live Chatwoot
-- [ ] Silent `human_needed` audit — every escalation sends outbound OR is documented
-- [ ] Fix stale HMAC unit test (timestamp in signed payload)
+- [ ] Decide O3/O4 product path (business digression vs silent handoff)
+- [ ] Silent `human_needed` paths documented for sales team (no outbound = intentional)
 
 ---
 
 ## Known Issues & Open Decisions
 
+### Migration 017 not applied (operational blocker)
+
+If migration **017** is missing on the ChatBot DB, RecEngine callback fails when writing InfoGatherer attribute companions:
+
+```
+CheckViolationError: conversations_ilgili_otel_set_by_check
+```
+
+Flow may still send hotel canned messages, but `write_attributes_at_flow_completion` errors. **Apply 017 before production.**
+
 ### Phrase gate — first unmatched opener (residual risk)
 
-The multi-filter phrase gate (`app/layers/phrase_gate.py`) now accepts natural Turkish greetings, housing/proximity intent, widget templates, and entity n-grams on the **first inbound message**. F-suite step-1 failures from the July 2026 test run were addressed by this module.
+The multi-filter phrase gate accepts natural Turkish greetings, housing/proximity intent, widget templates, and entity n-grams on the **first inbound message**.
 
-**Residual risk:** If the first message matches **no** filter and is not a hotel n-gram match, the gate returns `IGNORE` — the conversation stays in `new` with **no outbound message** and no escalation. This is intentional (not `human_needed`) but can look like a broken bot to leads who open with unstructured text.
+**Residual risk:** If the first message matches **no** filter and is not a hotel n-gram match, the gate returns `IGNORE` — conversation stays in `new` with **no outbound message** and no escalation. Intentional (not `human_needed`) but can look like a dead bot.
 
 ### Silent `human_needed`
 
-`_escalate_human_needed` updates DB only — no Chatwoot message. Affects: second invalid campus reply, gender parse failures, post-completion free text, and (after matching-fixes) second invalid university reply. First invalid campus/university replies **do** send outbound clarification canned responses (migration 014).
+`_escalate_human_needed` updates DB + `human_needed` label only — **no Chatwoot message**. By design (leads should not perceive a bot failure).
+
+Affects: off-script in `awaiting_university`/`awaiting_gender`, second invalid campus/university reply, post-completion free text. First invalid **answer attempts** still get `clarify_*` canned responses.
+
+### Business digression mid-flow (O3/O4 — open product decision)
+
+Live O-suite **passed** with silent handoff for:
+
+- `konaklama arıyorum` (housing intent after university ask)
+- `fiyat bilgisi alabilir miyim` (price inquiry after university ask)
+
+These are **high-intent business messages**, not random off-script. Phrase gate accepts similar wording on the **first** message; mid-flow they hit request-verb off-script markers.
+
+**Options under consideration** (not implemented):
+
+| Option | Customer sees | Sales sees |
+|--------|---------------|------------|
+| **A — Keep silent** (current) | Nothing until human replies | `human_needed` (+ optional intent labels) |
+| **B — Re-anchor canned** | One natural re-ask for university / price context | Lead stays in funnel |
+| **C — FallBack V2 slice** | LLM acknowledgment + re-ask | Same, with more variant coverage |
+
+See O3/O4 notes in [`docs/wa_test_off_script_detection.md`](docs/wa_test_off_script_detection.md).
 
 ### Open product decisions
 
 | Item | Question |
 |------|----------|
-| RecEngine geography (F3) | Should `hotel_accessible_universities` be narrowed? Should `priority_score` encode district proximity? |
-| Out-of-Istanbul vs silent handoff | Second invalid university reply → silent `human_needed` (implemented). National-university list still deferred for F10. |
-| Out-of-Istanbul (F10) | Same path for nonsense vs real out-of-area universities — acceptable? |
-| National university list | Deferred — see Fix 5 in `docs/matching-fixes-impl-spec.md` |
+| Business digression (O3/O4) | Silent handoff vs re-anchor canned vs FallBack? |
+| RecEngine geography (F3) | Narrow `hotel_accessible_universities`? District-aware `priority_score`? |
+| Out-of-Istanbul (F10) | National list exists (015); second invalid uni still → silent handoff, not out-of-city |
+| National uni on first try | Real out-of-area name on first attempt → `/istanbul`; nonsense → clarify then silent |
 
 ### Engineering gaps (not all V1 blockers)
 
 | Gap | Detail |
 |-----|--------|
-| No CI | pytest exists but nothing runs on push/PR |
+| No CI | pytest exists (198 tests) but nothing runs on push/PR |
+| Migration 017 on prod | Code assumes `*_set_by` columns; verify before go-live |
 | In-memory feedback-loop guard | `_recent_self_writes` breaks with multiple Railway replicas |
 | localhost internal HTTP | RecEngine callbacks via `http://localhost:{PORT}` — fragile multi-dyno |
-| Full-table loads per message | `get_all_hotels()`, `get_all_universities()`, `get_all_university_aliases()` — needs caching at scale |
+| Full-table loads per message | `get_all_hotels()`, `get_all_universities()`, … — needs caching at scale |
 | Nightly batch stub | `batch_client._submit_batch()` may log warning until GCP wired |
 | `.env.example` default | `INTEGRITY_CHECK_BYPASS=true` is risky for production templates |
 | `deal_awaiting_msg` | Still `<TODO>` in migration 006 seed |
+| RecEngine callback timeout | Observed ReadTimeout on localhost callback under load; ladder may still resolve |
 
 ### F6 — campus alias `taşkışla`
 
@@ -1111,13 +1266,16 @@ Resolves via Tier-2 alias in `match_university()` (direct from `awaiting_univers
 |----------|---------|
 | [`docs/univotel-chatbot-spec.md`](docs/univotel-chatbot-spec.md) | V0 master spec — InfoGatherer, RecEngine, security, DB |
 | [`docs/tagassigner-v1-spec.md`](docs/tagassigner-v1-spec.md) | V1 TagAssigner — triggers, 4 lists, conflict rule, batch |
+| [`docs/018_tagassigner_attributes_info_check_spec.md`](docs/018_tagassigner_attributes_info_check_spec.md) | Attributes, set_by companions, info-check, ilgili_otel ownership |
 | [`docs/tagassigner-build-brief.md`](docs/tagassigner-build-brief.md) | Governing build brief (wins conflicts over v1-spec) |
 | [`docs/tagassigner-phase-plan.md`](docs/tagassigner-phase-plan.md) | Phase-by-phase implementation plan with exit criteria |
 | [`docs/v0-amendment-deal-awaiting.md`](docs/v0-amendment-deal-awaiting.md) | `deal_awaiting` flow amendment to InfoGatherer |
+| [`docs/017_deal_awaiting_recengine_spec.md`](docs/017_deal_awaiting_recengine_spec.md) | Deal-awaiting RecEngine sentinels + label behavior |
 | [`docs/v1-audit.md`](docs/v1-audit.md) | Production readiness audit — failures, decisions, checklist |
 | [`docs/chatbot-phrase-gate-and-matching-spec.md`](docs/chatbot-phrase-gate-and-matching-spec.md) | Phrase gate, clarification flows, matching normalization |
-| [`docs/matching-fixes-impl-spec.md`](docs/matching-fixes-impl-spec.md) | Pending matching/clarification fixes (F6, F8, dynamic Levenshtein) |
-| [`docs/wa_test_links.md`](docs/wa_test_links.md) | WhatsApp functional test links F1–F10 with annotations |
+| [`docs/matching-fixes-impl-spec.md`](docs/matching-fixes-impl-spec.md) | Matching/clarification fixes (implemented) |
+| [`docs/wa_test_links.md`](docs/wa_test_links.md) | WhatsApp functional test links F1–F10 |
+| [`docs/wa_test_off_script_detection.md`](docs/wa_test_off_script_detection.md) | WhatsApp O1–O10 off-script / answer-classifier tests |
 | [`docs/test_plan_flags_1_and_2.md`](docs/test_plan_flags_1_and_2.md) | Suite A/B/F definitions and exit criteria |
 | [`docs/test-and-fix-1.md`](docs/test-and-fix-1.md) | Conv-52 root-cause analysis and fix list |
 | [`docs/hotel_data_state_audit.sql`](docs/hotel_data_state_audit.sql) | Suite A SQL audit queries |
@@ -1131,11 +1289,12 @@ Resolves via Tier-2 alias in `match_university()` (direct from `awaiting_univers
 When making changes:
 
 1. Read the relevant spec in `docs/` before modifying layer logic
-2. Run `pytest` before opening a PR
-3. For InfoGatherer/RecEngine changes, re-run conv-52 smoke test and relevant F-suite cases
-4. For schema changes, add a new numbered migration file — do not edit applied migrations
-5. Keep `MODEL_ID` as an env constant; never hardcode Gemini model names
-6. Never commit secrets; verify `.env` is gitignored
-7. Migrations are handed over for manual Supabase application — do not auto-apply from app code
+2. Run `pytest` before opening a PR (198 tests)
+3. For InfoGatherer/RecEngine changes: re-run conv-52 smoke + relevant F-suite cases
+4. For answer-classifier changes: run O-suite ([`docs/wa_test_off_script_detection.md`](docs/wa_test_off_script_detection.md))
+5. For schema changes, add a new numbered migration file — do not edit applied migrations
+6. Keep `MODEL_ID` as an env constant; never hardcode Gemini model names
+7. Never commit secrets; verify `.env` is gitignored
+8. Migrations are handed over for manual Supabase application — do not auto-apply from app code
 
-For questions about scope, the V0 spec's §10 ("Things deferred, not rejected") documents features intentionally left for FallBack V2: post-completion re-recommendation and general intent routing.
+For scope questions, see V0 spec §10 (“Things deferred, not rejected”) and FallBack V2: post-completion re-recommendation, general intent routing, and business-digression handling (O3/O4).

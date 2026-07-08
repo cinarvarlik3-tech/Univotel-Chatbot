@@ -40,9 +40,10 @@ _WILDCARD_SUFFIX = normalize("yakınında öğrenci konaklaması")
 # Filter 3 — greeting words (normalized); short tokens use word boundaries
 _GREETING_WORDS = [
     "merhaba", "merhabalar", "selam", "selamlar", "hi", "hello", "hey",
+    "sa", "slm", "salam", "heyy",
     "iyi günler", "iyi akşamlar", "iyi sabahlar", "günaydın", "kolay gelsin",
 ]
-_BOUNDARY_GREETINGS = {"hi", "hey"}
+_BOUNDARY_GREETINGS = {"hi", "hey", "sa", "slm", "salam", "heyy"}
 
 # Filter 4 — housing intent
 _HOUSING_WORDS = ["konaklama", "yurt", "oda", "öğrenci oteli", "residence"]

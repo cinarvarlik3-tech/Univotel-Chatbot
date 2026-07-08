@@ -6,6 +6,8 @@
 **Out of scope (V2, documented for context only):** FallBack, sales-action awareness (NetGSM/CRM integration)
 **Companion document:** *V0 Amendment Note* (covers the `deal_awaiting` flow added to InfoGatherer during V1 planning)
 
+> **Amendment (spec 018):** Custom-attribute merge, `set_by` companions, two-way CRM sync, and Router-owned `info-check` supersede §6.9 deterministic-only attribute writes. See `docs/018_tagassigner_attributes_info_check_spec.md`.
+
 ---
 
 ## 1. Project Summary & Goal

@@ -2,7 +2,7 @@
 Live Gemini API calls for daytime TagAssigner runs (§4.3 of tagassigner-v1-spec.md).
 
 Model ID is always read from settings.model_id (never hardcoded).
-Gemini's only output is the proposed label set — attributes are Router-computed.
+Gemini returns labels + bot-writable attributes; Router merges and persists (spec 018).
 """
 from __future__ import annotations
 import asyncio
@@ -10,7 +10,8 @@ import logging
 from typing import Optional
 
 from app.config import settings
-from app.tagassigner.payload_builder import parse_gemini_response
+from app.tagassigner.payload_builder import parse_gemini_tag_result
+from app.tagassigner.gemini_types import GeminiTagResult
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +21,9 @@ _RETRY_DELAYS = [1.0, 2.0, 4.0]
 async def call_gemini(
     system_prompt: str,
     user_content: str,
-) -> Optional[list[str]]:
+) -> Optional[GeminiTagResult]:
     """
-    Send a single live request to Gemini and return the parsed label list.
+    Send a single live request to Gemini and return the parsed result.
     Returns None on unrecoverable failure.
     Retries on 5xx/timeout (1s/2s/4s); aborts on 4xx.
     """
@@ -44,14 +45,14 @@ async def call_gemini(
             )
             if response is None:
                 return None
-            labels = parse_gemini_response(response)
-            if labels is None:
+            result = parse_gemini_tag_result(response)
+            if result is None:
                 logger.error(
                     "gemini_client: malformed response on attempt %d: %r",
                     attempt, response[:200],
                 )
                 return None
-            return labels
+            return result
 
         except Exception as exc:
             last_error = str(exc)

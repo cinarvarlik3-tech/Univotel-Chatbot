@@ -13,6 +13,18 @@ from app.db.models import Conversation, OutOfCityUniversity, University, Univers
 from app.layers import info_gatherer
 
 
+@pytest.fixture(autouse=True)
+def _mock_pre_recengine_catalog():
+    """Uniform pre-RecEngine pipeline loads reference tables on every turn."""
+    with patch.object(info_gatherer.queries, "get_all_hotels", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "get_all_universities", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "get_all_university_aliases", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "get_all_out_of_city_universities", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "reset_divergence_persistence", new_callable=AsyncMock), \
+         patch.object(info_gatherer.queries, "get_conversation_by_id", new_callable=AsyncMock, return_value=None):
+        yield
+
+
 def _conversation(**kwargs) -> Conversation:
     defaults = {
         "id": uuid.uuid4(),
@@ -62,11 +74,99 @@ async def test_should_clarify_on_unknown_input_before_out_of_city_miss():
          patch.object(info_gatherer.queries, "get_all_university_aliases", new_callable=AsyncMock, return_value=[]), \
          patch.object(info_gatherer.queries, "get_all_out_of_city_universities", new_callable=AsyncMock, return_value=[]), \
          patch.object(info_gatherer, "_fire_out_of_city", new_callable=AsyncMock) as fire_ooc, \
-         patch.object(info_gatherer, "_handle_university_no_match", new_callable=AsyncMock) as no_match:
+         patch.object(info_gatherer, "_handle_university_no_match", new_callable=AsyncMock) as no_match, \
+         patch.object(info_gatherer, "_escalate_human_needed", new_callable=AsyncMock) as escalate:
         await info_gatherer._handle_awaiting_university(conv, 52, "qwerty üniversitesi")
 
     no_match.assert_awaited_once_with(conv, 52, "qwerty üniversitesi")
     fire_ooc.assert_not_awaited()
+    escalate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_should_route_off_script_university_reply_to_divergence():
+    conv = _conversation(flow_state="awaiting_university", clarification_attempt=0)
+
+    with patch.object(info_gatherer.queries, "get_all_universities", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "get_all_university_aliases", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "get_all_out_of_city_universities", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer, "_handle_university_no_match", new_callable=AsyncMock) as no_match, \
+         patch.object(info_gatherer, "_run_divergence_recovery", new_callable=AsyncMock) as divergence:
+        await info_gatherer._handle_awaiting_university(conv, 52, "yeriniz nerde")
+
+    divergence.assert_awaited_once_with(
+        conv, 52, "yeriniz nerde",
+        flow_state="awaiting_university", fallback="escalate_off_script",
+    )
+    no_match.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_should_clarify_when_awaiting_university_reply_is_unmatched_answer_attempt():
+    conv = _conversation(flow_state="awaiting_university", clarification_attempt=0)
+
+    with patch.object(info_gatherer.queries, "get_all_universities", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "get_all_university_aliases", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "get_all_out_of_city_universities", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer, "_handle_university_no_match", new_callable=AsyncMock) as no_match, \
+         patch.object(info_gatherer, "_escalate_human_needed", new_callable=AsyncMock) as escalate:
+        await info_gatherer._handle_awaiting_university(conv, 52, "TÖÜ")
+
+    no_match.assert_awaited_once_with(conv, 52, "TÖÜ")
+    escalate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_should_clarify_when_long_fake_university_name_is_answer_attempt():
+    conv = _conversation(flow_state="awaiting_university", clarification_attempt=0)
+
+    with patch.object(info_gatherer.queries, "get_all_universities", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "get_all_university_aliases", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "get_all_out_of_city_universities", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer, "_handle_university_no_match", new_callable=AsyncMock) as no_match, \
+         patch.object(info_gatherer, "_escalate_human_needed", new_callable=AsyncMock) as escalate:
+        await info_gatherer._handle_awaiting_university(
+            conv, 52, "totally fake university name",
+        )
+
+    no_match.assert_awaited_once()
+    escalate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_should_post_match_when_valid_university_before_classifier_runs():
+    conv = _conversation(flow_state="awaiting_university", clarification_attempt=0)
+    bogazici = _istanbul_uni("Boğaziçi Üniversitesi")
+
+    with patch.object(info_gatherer.queries, "get_all_universities", new_callable=AsyncMock, return_value=[bogazici]), \
+         patch.object(info_gatherer.queries, "get_all_university_aliases", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "get_all_out_of_city_universities", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "reset_divergence_persistence", new_callable=AsyncMock), \
+         patch.object(info_gatherer, "_route_university_match", new_callable=AsyncMock, return_value=True) as route, \
+         patch.object(info_gatherer, "_handle_post_match", new_callable=AsyncMock) as post_match, \
+         patch.object(info_gatherer, "_handle_university_no_match", new_callable=AsyncMock) as no_match, \
+         patch.object(info_gatherer, "_escalate_human_needed", new_callable=AsyncMock) as escalate:
+        await info_gatherer._handle_awaiting_university(conv, 52, "boğaziçi")
+
+    route.assert_awaited_once()
+    post_match.assert_not_awaited()
+    no_match.assert_not_awaited()
+    escalate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_should_route_off_script_to_divergence_even_when_clarification_attempt_is_one():
+    conv = _conversation(flow_state="awaiting_university", clarification_attempt=1)
+
+    with patch.object(info_gatherer.queries, "get_all_universities", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "get_all_university_aliases", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "get_all_out_of_city_universities", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer, "_handle_university_no_match", new_callable=AsyncMock) as no_match, \
+         patch.object(info_gatherer, "_run_divergence_recovery", new_callable=AsyncMock) as divergence:
+        await info_gatherer._handle_awaiting_university(conv, 52, "yeriniz nerede")
+
+    divergence.assert_awaited_once()
+    no_match.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -92,12 +192,16 @@ async def test_should_continue_istanbul_flow_on_clarification_retry():
 
     with patch.object(info_gatherer.queries, "get_all_universities", new_callable=AsyncMock, return_value=[bogazici]), \
          patch.object(info_gatherer.queries, "get_all_university_aliases", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "get_all_out_of_city_universities", new_callable=AsyncMock, return_value=[]), \
+         patch.object(info_gatherer.queries, "reset_divergence_persistence", new_callable=AsyncMock), \
+         patch.object(info_gatherer, "_route_university_match", new_callable=AsyncMock, return_value=True) as route, \
          patch.object(info_gatherer, "_handle_post_match", new_callable=AsyncMock) as post_match, \
          patch.object(info_gatherer, "_fire_out_of_city", new_callable=AsyncMock) as fire_ooc, \
          patch.object(info_gatherer, "_escalate_human_needed", new_callable=AsyncMock) as escalate:
         await info_gatherer._handle_clarification(conv, 52, "boğaziçi")
 
-    post_match.assert_awaited_once_with(conv, 52, bogazici.id)
+    route.assert_awaited_once()
+    post_match.assert_not_awaited()
     fire_ooc.assert_not_awaited()
     escalate.assert_not_awaited()
 
@@ -133,17 +237,17 @@ async def test_should_reprompt_once_on_first_short_invalid_university():
 
 
 @pytest.mark.asyncio
-async def test_should_escalate_silently_on_second_invalid_university_clarification():
+async def test_should_route_invalid_clarification_to_divergence():
     conv = _conversation(flow_state="awaiting_university_clarification", clarification_attempt=1)
 
     with patch.object(info_gatherer.queries, "get_all_universities", new_callable=AsyncMock, return_value=[]), \
          patch.object(info_gatherer.queries, "get_all_university_aliases", new_callable=AsyncMock, return_value=[]), \
          patch.object(info_gatherer.queries, "get_all_out_of_city_universities", new_callable=AsyncMock, return_value=[]), \
          patch.object(info_gatherer, "_send_canned", new_callable=AsyncMock) as send, \
-         patch.object(info_gatherer, "_escalate_human_needed", new_callable=AsyncMock) as escalate:
+         patch.object(info_gatherer, "_run_divergence_recovery", new_callable=AsyncMock) as divergence:
         await info_gatherer._handle_clarification(conv, 52, "totally fake university name")
 
-    escalate.assert_awaited_once()
+    divergence.assert_awaited_once()
     send.assert_not_awaited()
 
 
@@ -254,6 +358,7 @@ async def test_should_proceed_to_gender_when_university_on_deal_awaiting_list():
 
     with patch.object(info_gatherer.queries, "reset_clarification_attempt", new_callable=AsyncMock), \
          patch.object(info_gatherer.queries, "set_conversation_university", new_callable=AsyncMock), \
+         patch.object(info_gatherer.queries, "get_conversation_by_id", new_callable=AsyncMock, return_value=conv), \
          patch.object(info_gatherer.queries, "update_conversation_state", new_callable=AsyncMock, return_value=True) as update, \
          patch.object(info_gatherer.queries, "is_deal_awaiting_university", new_callable=AsyncMock, return_value=True), \
          patch.object(info_gatherer, "_send_canned", new_callable=AsyncMock) as send, \
@@ -265,3 +370,18 @@ async def test_should_proceed_to_gender_when_university_on_deal_awaiting_list():
     send.assert_awaited_once_with(52, info_gatherer.CANNED_KIZ_ERKEK)
     write_label.assert_not_awaited()
     send_hotel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_should_route_off_script_gender_reply_to_divergence():
+    conv = _conversation(flow_state="awaiting_gender", clarification_attempt=0)
+
+    with patch.object(info_gatherer, "_run_divergence_recovery", new_callable=AsyncMock) as divergence, \
+         patch.object(info_gatherer.queries, "set_conversation_gender", new_callable=AsyncMock) as set_gender:
+        await info_gatherer._handle_awaiting_gender(conv, 52, "yeriniz nerde")
+
+    divergence.assert_awaited_once_with(
+        conv, 52, "yeriniz nerde",
+        flow_state="awaiting_gender", fallback="escalate_off_script",
+    )
+    set_gender.assert_not_awaited()

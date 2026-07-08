@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # Manual triggers (private "tag" note or "tag" label in Chatwoot) still work.
     tagassigner_auto_runs: bool = True
 
+    # Inbound message debounce (Spec 020 Part E). 0 = disabled (process immediately).
+    debounce_window_seconds: int = 3
+
     @field_validator("database_url")
     @classmethod
     def database_url_must_be_postgres(cls, v: str) -> str:
@@ -58,6 +61,29 @@ TAGASSIGNER_ATTRIBUTE_KEYS: list[str] = [
     "oda_tiipi",   # keep the exact Chatwoot key (double-i) — verify against live Chatwoot
     "butce",
 ]
+
+# Bot-writable custom attributes (Gemini proposes; Router merges — spec 018).
+TAGASSIGNER_BOT_WRITABLE_ATTRIBUTES: list[str] = [
+    "university",
+    "ogrenci_cinsiyet",
+    "oda_tiipi",
+]
+
+# Chatwoot oda_tiipi list values (live Chatwoot, confirmed 2026-07-06).
+TAGASSIGNER_ROOM_TYPE_VALUES: list[str] = [
+    "Tek Kişilik",
+    "Çift Kişilik",
+    "Yurt Tipi",
+    "Fark Etmez",
+    "Üç Kişilik",
+    "Dört Kişilik",
+    "Beş Kişilik",
+    "1+1",
+    "2+1",
+    "3+1",
+]
+
+INFO_CHECK_TTL_HOURS: int = 48
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),

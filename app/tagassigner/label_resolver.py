@@ -16,7 +16,7 @@ LIST_1_USABLE: frozenset[str] = frozenset([
     "ogrenci", "veli", "ogrenci-degil",
     "kyk-sonuc-bekliyor", "ibb-yurdu-sonuc-bekliyor",
     "universite-yurdu-sonuc-bekliyor", "yatay_geçiş_bekliyor",
-    "univotelli", "fiyat-soruyor", "ilgilenmiyor",
+    "univotelli", "fiyat-soruyor", "ilgilenmiyor", "info-check",
     "ziyaret", "ziyaret-etti", "ziyaret-etmedi",
 ])
 

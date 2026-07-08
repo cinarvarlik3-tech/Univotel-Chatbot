@@ -16,7 +16,7 @@ from app.db.models import (
     HotelChatwootLabelMap, UniversityChatwootLabelMap,
     ParentUniversity, UniversityParentMap,
     TagAssignerRun, TagAssignerLog, TagAssignerQueueItem,
-    Message,
+    Message, DivergenceRoutingRow,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,6 +108,26 @@ async def set_conversation_university(
     )
 
 
+async def set_conversation_gender_human(
+    conversation_id: uuid.UUID,
+    gender: Optional[str],
+) -> None:
+    """Human CRM edit for ogrenci_cinsiyet (allows NULL for Bilinmiyor)."""
+    pool = get_pool()
+    now = datetime.now()
+    await pool.execute(
+        """
+        UPDATE conversations SET
+            gender = $2,
+            gender_set_by = 'human',
+            gender_set_at = $3,
+            last_updated_at = now()
+        WHERE id = $1
+        """,
+        conversation_id, gender, now,
+    )
+
+
 async def set_conversation_gender(
     conversation_id: uuid.UUID, gender: str
 ) -> None:
@@ -132,6 +152,71 @@ async def set_conversation_stopped(conversation_id: uuid.UUID) -> None:
         "UPDATE conversations SET flow_state = 'stopped', last_updated_at = now() WHERE id = $1",
         conversation_id,
     )
+
+
+async def set_conversation_bot_enabled(conversation_id: uuid.UUID, enabled: bool) -> None:
+    """Persist outbound-first gating flag (spec 019 §9.3)."""
+    pool = get_pool()
+    await pool.execute(
+        "UPDATE conversations SET bot_enabled = $2, last_updated_at = now() WHERE id = $1",
+        conversation_id, enabled,
+    )
+
+
+async def reset_divergence_persistence(conversation_id: uuid.UUID) -> None:
+    """Clear same-intent repeat counter after slot progress or advance."""
+    pool = get_pool()
+    await pool.execute(
+        """
+        UPDATE conversations
+        SET last_divergence_intent = NULL,
+            divergence_repeat_count = 0,
+            last_updated_at = now()
+        WHERE id = $1
+        """,
+        conversation_id,
+    )
+
+
+async def update_divergence_persistence(
+    conversation_id: uuid.UUID,
+    intent: str,
+    repeat_count: int,
+) -> None:
+    """Record classifier intent and consecutive repeat count for persistence cap."""
+    pool = get_pool()
+    await pool.execute(
+        """
+        UPDATE conversations
+        SET last_divergence_intent = $2,
+            divergence_repeat_count = $3,
+            last_updated_at = now()
+        WHERE id = $1
+        """,
+        conversation_id, intent, repeat_count,
+    )
+
+
+async def conversation_has_messages(conversation_id: uuid.UUID) -> bool:
+    """True when any message row exists for the conversation."""
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT 1 FROM messages WHERE conversation_id = $1 LIMIT 1",
+        conversation_id,
+    )
+    return row is not None
+
+
+async def get_all_divergence_routing() -> list[DivergenceRoutingRow]:
+    """Load the full divergence routing policy table."""
+    pool = get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT intent, flow_state, action, canned_response_id, canned_response_alt_id
+        FROM divergence_routing
+        """
+    )
+    return [DivergenceRoutingRow(**dict(r)) for r in rows]
 
 
 async def is_first_inbound_message(
@@ -238,10 +323,19 @@ async def sync_conversation_labels_and_attributes(
     kayip_nedeni: Optional[str] = None,
     oda_tiipi: Optional[str] = None,
     butce: Optional[str] = None,
+    university_id: Optional[uuid.UUID] = None,
+    gender: Optional[str] = None,
+    university_set_at: Optional[datetime] = None,
+    university_set_by: Optional[str] = None,
+    gender_set_at: Optional[datetime] = None,
+    gender_set_by: Optional[str] = None,
+    oda_tiipi_set_at: Optional[datetime] = None,
+    oda_tiipi_set_by: Optional[str] = None,
 ) -> None:
     """
     Downstream-replica sync from a Chatwoot conversation_updated webhook.
     Updates atomically so _set_at/_set_by are never stale relative to the value.
+    Optional university/gender/oda_tiipi companions apply on human CRM edits (spec 018).
     """
     pool = get_pool()
     await pool.execute(
@@ -254,14 +348,26 @@ async def sync_conversation_labels_and_attributes(
             ilgili_otel_set_by   = $5,
             tasinma_tarihi       = $6,
             kayip_nedeni         = $7,
-            oda_tiipi            = $8,
-            butce                = $9
+            oda_tiipi            = COALESCE($8, oda_tiipi),
+            butce                = $9,
+            university_id        = COALESCE($10, university_id),
+            gender               = COALESCE($11, gender),
+            university_set_at    = COALESCE($12, university_set_at),
+            university_set_by    = COALESCE($13, university_set_by),
+            gender_set_at        = COALESCE($14, gender_set_at),
+            gender_set_by        = COALESCE($15, gender_set_by),
+            oda_tiipi_set_at     = COALESCE($16, oda_tiipi_set_at),
+            oda_tiipi_set_by     = COALESCE($17, oda_tiipi_set_by)
         WHERE id = $1
         """,
         conversation_id,
         labels,
         ilgili_otel, ilgili_otel_set_at, ilgili_otel_set_by,
         tasinma_tarihi, kayip_nedeni, oda_tiipi, butce,
+        university_id, gender,
+        university_set_at, university_set_by,
+        gender_set_at, gender_set_by,
+        oda_tiipi_set_at, oda_tiipi_set_by,
     )
 
 
@@ -543,6 +649,197 @@ async def get_chatwoot_list_value_for_university(university_id: uuid.UUID) -> Op
     return row["chatwoot_list_value"] if row else None
 
 
+async def get_university_id_for_chatwoot_list_value(chatwoot_list_value: str) -> Optional[uuid.UUID]:
+    """Reverse-map a Chatwoot university list string to universities.id."""
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT university_id FROM university_chatwoot_label_map WHERE chatwoot_list_value = $1",
+        chatwoot_list_value,
+    )
+    return row["university_id"] if row else None
+
+
+async def apply_tagassigner_attribute_updates(
+    conversation_id: uuid.UUID,
+    *,
+    university_id: Optional[uuid.UUID] = None,
+    gender: Optional[str] = None,
+    gender_clear: bool = False,
+    oda_tiipi: Optional[str] = None,
+    set_by: str = "tagAssigner",
+) -> None:
+    """
+    Persist accepted TagAssigner attribute changes with set_by companions (spec 018).
+    Only non-None kwargs are updated; gender_clear sets gender NULL explicitly.
+    """
+    pool = get_pool()
+    now = datetime.now()
+    sets: list[str] = ["last_updated_at = now()"]
+    params: list = [conversation_id]
+    idx = 2
+
+    if university_id is not None:
+        sets.append(f"university_id = ${idx}")
+        params.append(university_id)
+        idx += 1
+        sets.append(f"university_set_by = ${idx}")
+        params.append(set_by)
+        idx += 1
+        sets.append(f"university_set_at = ${idx}")
+        params.append(now)
+        idx += 1
+
+    if gender_clear:
+        sets.append("gender = NULL")
+        sets.append(f"gender_set_by = ${idx}")
+        params.append(set_by)
+        idx += 1
+        sets.append(f"gender_set_at = ${idx}")
+        params.append(now)
+        idx += 1
+    elif gender is not None:
+        sets.append(f"gender = ${idx}")
+        params.append(gender)
+        idx += 1
+        sets.append(f"gender_set_by = ${idx}")
+        params.append(set_by)
+        idx += 1
+        sets.append(f"gender_set_at = ${idx}")
+        params.append(now)
+        idx += 1
+
+    if oda_tiipi is not None:
+        sets.append(f"oda_tiipi = ${idx}")
+        params.append(oda_tiipi)
+        idx += 1
+        sets.append(f"oda_tiipi_set_by = ${idx}")
+        params.append(set_by)
+        idx += 1
+        sets.append(f"oda_tiipi_set_at = ${idx}")
+        params.append(now)
+        idx += 1
+
+    if len(sets) == 1:
+        return
+
+    await pool.execute(
+        f"UPDATE conversations SET {', '.join(sets)} WHERE id = $1",
+        *params,
+    )
+
+
+async def update_info_check_state(
+    conversation_id: uuid.UUID,
+    *,
+    fingerprint: Optional[str] = None,
+    added_at: Optional[datetime] = None,
+    suppressed_fingerprint: Optional[str] = None,
+    clear_active: bool = False,
+) -> None:
+    """
+    Update info-check router state on conversations.
+    clear_active=True nulls fingerprint and added_at without touching suppressed.
+    """
+    pool = get_pool()
+    if clear_active:
+        await pool.execute(
+            """
+            UPDATE conversations SET
+                info_check_fingerprint = NULL,
+                info_check_added_at = NULL,
+                last_updated_at = now()
+            WHERE id = $1
+            """,
+            conversation_id,
+        )
+        return
+
+    await pool.execute(
+        """
+        UPDATE conversations SET
+            info_check_fingerprint = COALESCE($2, info_check_fingerprint),
+            info_check_added_at = COALESCE($3, info_check_added_at),
+            info_check_suppressed_fingerprint = COALESCE($4, info_check_suppressed_fingerprint),
+            last_updated_at = now()
+        WHERE id = $1
+        """,
+        conversation_id,
+        fingerprint,
+        added_at,
+        suppressed_fingerprint,
+    )
+
+
+async def set_info_check_suppressed_from_dismiss(
+    conversation_id: uuid.UUID,
+    dismissed_fingerprint: Optional[str],
+) -> None:
+    """Human removed info-check — suppress re-add for this fingerprint."""
+    pool = get_pool()
+    await pool.execute(
+        """
+        UPDATE conversations SET
+            info_check_suppressed_fingerprint = $2,
+            info_check_fingerprint = NULL,
+            info_check_added_at = NULL,
+            last_updated_at = now()
+        WHERE id = $1
+        """,
+        conversation_id,
+        dismissed_fingerprint,
+    )
+
+
+async def mark_infogatherer_attribute_companions(
+    conversation_id: uuid.UUID,
+    *,
+    wrote_university: bool,
+    wrote_gender: bool,
+    wrote_ilgili_otel: bool,
+    ilgili_otel: Optional[str] = None,
+    ilgili_otel_set_at: Optional[datetime] = None,
+) -> None:
+    """Set set_by=infoGatherer on fields written at RecEngine flow completion."""
+    pool = get_pool()
+    now = datetime.now()
+    sets = ["last_updated_at = now()"]
+    params: list = [conversation_id]
+    idx = 2
+
+    if wrote_university:
+        sets.extend([
+            f"university_set_by = ${idx}",
+            f"university_set_at = ${idx + 1}",
+        ])
+        params.extend(["infoGatherer", now])
+        idx += 2
+
+    if wrote_gender:
+        sets.extend([
+            f"gender_set_by = ${idx}",
+            f"gender_set_at = ${idx + 1}",
+        ])
+        params.extend(["infoGatherer", now])
+        idx += 2
+
+    if wrote_ilgili_otel:
+        sets.extend([
+            f"ilgili_otel = ${idx}",
+            f"ilgili_otel_set_by = ${idx + 1}",
+            f"ilgili_otel_set_at = ${idx + 2}",
+        ])
+        params.extend([ilgili_otel, "infoGatherer", ilgili_otel_set_at or now])
+        idx += 3
+
+    if len(sets) == 1:
+        return
+
+    await pool.execute(
+        f"UPDATE conversations SET {', '.join(sets)} WHERE id = $1",
+        *params,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Universities
 # ---------------------------------------------------------------------------
@@ -650,6 +947,16 @@ async def get_canned_response_by_short_code(short_code: str) -> Optional[CannedR
     row = await pool.fetchrow(
         "SELECT id, short_code, content FROM canned_responses WHERE short_code = $1",
         short_code,
+    )
+    return CannedResponse(**dict(row)) if row else None
+
+
+async def get_canned_response_by_id(response_id: uuid.UUID) -> Optional[CannedResponse]:
+    """Fetch canned response content by primary key (divergence routing FKs)."""
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT id, short_code, content FROM canned_responses WHERE id = $1",
+        response_id,
     )
     return CannedResponse(**dict(row)) if row else None
 

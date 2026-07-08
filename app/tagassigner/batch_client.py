@@ -172,17 +172,17 @@ async def process_batch_results(output_file_uri: str, run_id_map: dict[str, str]
             run_id = uuid.UUID(run_id_str)
             conversation_id = uuid.UUID(custom_id)
 
-            from app.tagassigner.payload_builder import parse_gemini_response
-            labels = parse_gemini_response(raw_response)
-            if labels is None:
+            from app.tagassigner.payload_builder import parse_gemini_tag_result
+            gemini_result = parse_gemini_tag_result(raw_response)
+            if gemini_result is None:
                 logger.error(
                     "batch_client: malformed Gemini response for conversation %s", conversation_id
                 )
                 await queries.update_tagassigner_run_failed(run_id)
                 continue
 
-            from app.tagassigner.router import apply_resolved_labels
-            await apply_resolved_labels(conversation_id, run_id, labels)
+            from app.tagassigner.router import apply_tagassigner_result
+            await apply_tagassigner_result(conversation_id, run_id, gemini_result)
 
         except Exception as exc:
             logger.error("batch_client: error processing batch result line: %s", exc)

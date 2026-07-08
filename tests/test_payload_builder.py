@@ -9,6 +9,7 @@ import pytest
 from unittest.mock import patch
 
 from app.tagassigner.payload_builder import (
+    parse_gemini_tag_result,
     parse_gemini_response,
     build_payload,
     build_batch_request,
@@ -16,68 +17,85 @@ from app.tagassigner.payload_builder import (
     _build_context,
 )
 
+_FULL_ATTRS = {
+    "university": "bilinmiyor",
+    "ogrenci_cinsiyet": "bilinmiyor",
+    "oda_tiipi": "boş",
+}
+
+
+def _full_response(labels):
+    import json
+    return json.dumps({"labels": labels, "attributes": dict(_FULL_ATTRS)})
+
 
 # ---------------------------------------------------------------------------
-# parse_gemini_response
+# parse_gemini_tag_result
 # ---------------------------------------------------------------------------
 
 def test_parse_clean_json():
-    raw = '{"labels": ["ogrenci", "ziyaret"]}'
-    result = parse_gemini_response(raw)
-    assert result == ["ogrenci", "ziyaret"]
+    raw = _full_response(["ogrenci", "ziyaret"])
+    result = parse_gemini_tag_result(raw)
+    assert result is not None
+    assert result.labels == ["ogrenci", "ziyaret"]
+    assert result.attributes["oda_tiipi"] == "boş"
 
 
 def test_parse_empty_labels():
-    raw = '{"labels": []}'
-    result = parse_gemini_response(raw)
-    assert result == []
+    raw = _full_response([])
+    result = parse_gemini_tag_result(raw)
+    assert result is not None
+    assert result.labels == []
 
 
 def test_parse_strips_markdown_fence_json():
-    raw = '```json\n{"labels": ["ogrenci"]}\n```'
-    result = parse_gemini_response(raw)
-    assert result == ["ogrenci"]
+    raw = '```json\n' + _full_response(["ogrenci"]) + '\n```'
+    result = parse_gemini_tag_result(raw)
+    assert result is not None
+    assert result.labels == ["ogrenci"]
 
 
 def test_parse_strips_plain_markdown_fence():
-    raw = '```\n{"labels": ["veli"]}\n```'
-    result = parse_gemini_response(raw)
-    assert result == ["veli"]
+    raw = '```\n' + _full_response(["veli"]) + '\n```'
+    result = parse_gemini_tag_result(raw)
+    assert result is not None
+    assert result.labels == ["veli"]
 
 
 def test_parse_returns_none_on_invalid_json():
-    assert parse_gemini_response("not json at all") is None
+    assert parse_gemini_tag_result("not json at all") is None
 
 
 def test_parse_returns_none_on_json_array():
-    assert parse_gemini_response('["ogrenci"]') is None
+    assert parse_gemini_tag_result('["ogrenci"]') is None
 
 
 def test_parse_returns_none_when_labels_key_missing():
-    assert parse_gemini_response('{"tags": ["ogrenci"]}') is None
+    assert parse_gemini_tag_result('{"tags": ["ogrenci"]}') is None
 
 
 def test_parse_returns_none_when_labels_not_list():
-    assert parse_gemini_response('{"labels": "ogrenci"}') is None
+    assert parse_gemini_tag_result('{"labels": "ogrenci", "attributes": {}}') is None
 
 
-def test_parse_drops_non_string_items():
-    raw = '{"labels": ["ogrenci", 42, null, "ziyaret"]}'
-    result = parse_gemini_response(raw)
-    assert result == ["ogrenci", "ziyaret"]
+def test_parse_returns_none_when_attributes_missing():
+    assert parse_gemini_tag_result('{"labels": ["ogrenci"]}') is None
 
 
-def test_parse_extra_keys_ignored():
-    raw = '{"labels": ["ogrenci"], "extra": "ignored"}'
-    assert parse_gemini_response(raw) == ["ogrenci"]
+def test_parse_drops_non_string_label_items():
+    import json
+    raw = json.dumps({
+        "labels": ["ogrenci", 42, None, "ziyaret"],
+        "attributes": _FULL_ATTRS,
+    })
+    result = parse_gemini_tag_result(raw)
+    assert result is not None
+    assert result.labels == ["ogrenci", "ziyaret"]
 
 
-def test_parse_empty_string_returns_none():
-    assert parse_gemini_response("") is None
-
-
-def test_parse_whitespace_only_returns_none():
-    assert parse_gemini_response("   ") is None
+def test_parse_legacy_wrapper_labels_only():
+    raw = '{"labels": ["ogrenci"]}'
+    assert parse_gemini_response(raw) is None
 
 
 # ---------------------------------------------------------------------------
@@ -168,15 +186,17 @@ def _conv(**kwargs):
     return Conversation(**defaults)
 
 
-def test_context_contains_university_id():
+def test_context_contains_bot_writable_section():
     conv = _conv(university_id=uuid.UUID("11111111-0000-0000-0000-000000000001"))
-    ctx = _build_context(conv, [])
-    assert "11111111-0000-0000-0000-000000000001" in ctx
+    ctx = _build_context(conv, [], university_display="Test University")
+    assert "Bot-writable" in ctx
+    assert "Test University" in ctx
+    assert "Human-only" in ctx
 
 
 def test_context_shows_bilinmiyor_when_no_university():
     conv = _conv()
-    ctx = _build_context(conv, [])
+    ctx = _build_context(conv, [], university_display=None)
     assert "bilinmiyor" in ctx
 
 

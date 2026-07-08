@@ -1,6 +1,7 @@
 from __future__ import annotations
 import uuid
 from datetime import date, datetime
+from enum import Enum
 from typing import Optional
 from pydantic import BaseModel
 
@@ -59,6 +60,40 @@ class Conversation(BaseModel):
     butce: Optional[str] = None
     ilgili_otel_set_at: Optional[datetime] = None
     ilgili_otel_set_by: Optional[str] = None
+    university_set_at: Optional[datetime] = None
+    university_set_by: Optional[str] = None
+    gender_set_at: Optional[datetime] = None
+    gender_set_by: Optional[str] = None
+    oda_tiipi_set_at: Optional[datetime] = None
+    oda_tiipi_set_by: Optional[str] = None
+    info_check_fingerprint: Optional[str] = None
+    info_check_added_at: Optional[datetime] = None
+    info_check_suppressed_fingerprint: Optional[str] = None
+    # Divergence recovery (spec 019)
+    bot_enabled: bool = True
+    last_divergence_intent: Optional[str] = None
+    divergence_repeat_count: int = 0
+
+
+class DivergenceAction(str, Enum):
+    ACTIVATE_FLOW = "activate_flow"
+    ANSWER_AND_REANCHOR = "answer_and_reanchor"
+    IGNORE = "ignore"
+    ESCALATE = "escalate"
+
+
+class DivergenceRoutingRow(BaseModel):
+    intent: str
+    flow_state: str
+    action: str
+    canned_response_id: Optional[uuid.UUID] = None
+    canned_response_alt_id: Optional[uuid.UUID] = None
+
+
+class RoutingDecision(BaseModel):
+    action: DivergenceAction
+    canned_response_id: Optional[uuid.UUID] = None
+    canned_response_alt_id: Optional[uuid.UUID] = None
 
 
 class Message(BaseModel):

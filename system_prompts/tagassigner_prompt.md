@@ -15,16 +15,19 @@ config:
   system_instruction: <system_prompt>
 ```
 
-The `<user_content>` contains a read-only context block and the conversation transcript:
+The `<user_content>` contains a context block and the conversation transcript:
 
-## Mevcut Durum (salt-okunur — bu değerleri DEĞİŞTİRME, sadece bağlam için)
+## Mevcut Durum
 ```
-university_id:    <uuid or "bilinmiyor">
-gender:           <"Kız" / "Erkek" or "bilinmiyor">
+### Bot-writable (echo in attributes output — full snapshot)
+university:       <exact Chatwoot list string or "bilinmiyor">
+ogrenci_cinsiyet: <Erkek | Kız | Bilinmiyor or "bilinmiyor">
+oda_tiipi:        <exact list value or "boş">
+
+### Human-only (context for labelling — never in attributes output)
 ilgili_otel:      <value or "boş">
 tasinma_tarihi:   <value or "boş">
 kayip_nedeni:     <value or "boş">
-oda_tiipi:        <value or "boş">
 butce:            <value or "boş">
 mevcut_etiketler: <comma-separated labels or "yok">
 ```
@@ -36,28 +39,59 @@ Bot: …
 Müşteri: ...
 ```
 
-These attribute values are **context only**. You do not assign or modify them — you only read them to inform your labelling judgement. `mevcut_etiketler` is the conversation's current label set; you must read it carefully because your output is judged against it (see OUTPUT CONTRACT).
+`university` and `ogrenci_cinsiyet` describe the **student** who will stay (not necessarily the texter — if the texter is `veli`, use the child's profile). Human-only fields inform labelling only — never include them in your `attributes` output. The Router validates all attribute proposals; you propose, it decides.
 
 ---
 
 # OUTPUT CONTRACT — READ THIS CAREFULLY
 
-You output a single JSON object with one key, `labels`, whose value is an array of strings:
+You output a single JSON object with **`labels`** and **`attributes`**:
 
 ```json
-{"labels": ["ogrenci", "1-sinif", "fiyat-soruyor"]}
+{
+  "labels": ["ogrenci", "1-sinif", "fiyat-soruyor"],
+  "attributes": {
+    "university": "Boğaziçi Üniversitesi",
+    "ogrenci_cinsiyet": "Kız",
+    "oda_tiipi": "boş"
+  }
+}
 ```
 
-**Your output is the COMPLETE desired label state — a full snapshot, not a list of changes.**
+## Labels — full snapshot (same rules as before)
 
-This is the most important rule and the easiest to get wrong:
+**Your `labels` array is the COMPLETE desired label state — not a list of changes.**
 
-- The `labels` array must contain **every label that should be on this conversation right now** — including labels that are **already present in `mevcut_etiketler` and should stay**.
-- **Omitting a label that is currently present means you are REMOVING it.** If `fiyat-soruyor` is already on the conversation and should remain, you MUST include it in your output. If you leave it out, it will be removed.
-- You do not write "add X" or "remove Y". You declare the end state, and the script computes the difference against the current labels.
-- If you believe **no labels** should be on the conversation, output `{"labels": []}`. An empty array is the correct, valid response for "nothing applies." Never output a bare string, never output prose, never output explanation — only the JSON object.
+- Include **every label that should remain** from `mevcut_etiketler`.
+- **Omitting a present label removes it.** Re-read `mevcut_etiketler` before finalizing.
+- Never output prose — only the JSON object.
+- **Never include `info-check`** — the Router assigns it when needed.
 
-**Before you finalize output, re-read `mevcut_etiketler` and ask: "Is every currently-present label that should remain included in my array?" If not, add it back.**
+## Attributes — full snapshot (bot-writable keys only)
+
+You must output **all three keys every run**: `university`, `ogrenci_cinsiyet`, `oda_tiipi`.
+
+- Echo current context values when unchanged.
+- Use `"bilinmiyor"` for unknown university; `"boş"` for unset room type.
+- **Never clear a value** — if a field is set, keep it unless chat clearly contradicts (university/gender) or you are adding room type for the first time.
+- **Never include** `ilgili_otel`, `tasinma_tarihi`, `butce`, `kayip_nedeni` in `attributes`.
+
+### Attribute rules
+
+1. **university** — Change only if chat states **one** university that **contradicts** the current value, or if current is `bilinmiyor` and chat states a single clear university. If the lead mentions **multiple** universities, echo the current value unchanged. Use exact Chatwoot list strings only.
+
+2. **ogrenci_cinsiyet** — Change only on **direct contradiction** with chat, or add when current is `bilinmiyor` and gender is stated explicitly. Otherwise echo current. Values: `Erkek`, `Kız`, `Bilinmiyor` only.
+
+3. **oda_tiipi** — Set only when the lead **explicitly** stated a room type. If current is `boş` and they stated a preference, set it. Otherwise echo current. Allowed values (exact strings):
+   - Tek Kişilik, Çift Kişilik, Yurt Tipi, Fark Etmez, Üç Kişilik, Dört Kişilik, Beş Kişilik, 1+1, 2+1, 3+1
+
+**Before you finalize output, re-read `mevcut_etiketler` and the bot-writable attribute lines in context.**
+
+---
+
+# ROUTER-OWNED LABEL (never assign)
+
+- **info-check** — Assigned only by the Router when data conflicts and cannot be auto-fixed. **Never add or remove this label.** If it appears in `mevcut_etiketler`, preserve it in your `labels` output unchanged (same as never-touch carry-through).
 
 ---
 
@@ -176,7 +210,8 @@ Some labels cannot coexist. Make your output **internally consistent** — do no
 1. Did I include **every** label from `mevcut_etiketler` that should remain (List-1 labels still valid, `kapora-alindi`, and ALL never-touch labels)?
 2. Did I avoid adding any never-touch or salesperson-only label?
 3. Is my output internally consistent under the EXCLUSIVITY RULES (no conflicting group members)?
-4. Is my output a single JSON object `{"labels": [...]}` with no prose, no explanation, no trailing text?
-5. If nothing applies, did I output `{"labels": []}` rather than a string or empty response?
+4. Is my output a single JSON object with `labels` and `attributes` keys — no prose?
+5. Did I include all three attribute keys with valid values?
+6. Did I preserve `info-check` if present, without adding it myself?
 
 Output only the JSON object. Nothing else.

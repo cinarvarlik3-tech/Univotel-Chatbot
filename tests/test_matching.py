@@ -6,13 +6,17 @@ from app.layers.matching import (
     MatchConfidence,
     normalize,
     match_university,
+    match_campus,
     match_out_of_city,
     match_hotel_by_ngram,
     scan_entities_by_ngram,
     word_count_after_normalize,
+    is_near_miss_university,
+    NEAR_MISS_BAND,
+    NEAR_MISS_MIN_LEN,
     _get_levenshtein_cutoff,
 )
-from app.db.models import University, UniversityAlias, Hotel, OutOfCityUniversity
+from app.db.models import University, UniversityAlias, Hotel, OutOfCityUniversity, UniversityParentMap
 
 
 def _uni(name: str, short_name: str | None = None) -> University:
@@ -69,6 +73,31 @@ def test_scan_entities_longest_first():
     )
     assert result.confidence == MatchConfidence.EXACT
     assert result.university_id == itu.id
+
+
+def test_should_match_campus_from_longer_message_via_ngram():
+    parent_id = uuid.uuid4()
+    goztepe_id = uuid.uuid4()
+    parent_alias = UniversityAlias(
+        id=uuid.uuid4(),
+        parent_university_id=parent_id,
+        alias="marmara",
+    )
+    campuses = [
+        UniversityParentMap(
+            university_id=goztepe_id,
+            parent_university_id=parent_id,
+            campus_label="Göztepe",
+        ),
+    ]
+    matched = match_campus(
+        "Marmara Üniversitesi Göztepe erkek öğrenci",
+        parent_id,
+        campuses,
+        [parent_alias],
+    )
+    assert matched is not None
+    assert matched.university_id == goztepe_id
 
 
 def test_match_hotel_by_ngram_typo():
@@ -276,3 +305,41 @@ def test_length_3_input_no_fuzzy_tier3():
     unis = [_uni("Boğaziçi Üniversitesi")]
     result = match_university("xyz", unis, [])
     assert result.confidence == MatchConfidence.NONE
+
+
+# ---------------------------------------------------------------------------
+# is_near_miss_university()
+# ---------------------------------------------------------------------------
+
+def test_should_return_true_when_input_is_one_edit_beyond_cutoff():
+    unis = [_uni("Marmara Üniversitesi")]
+    # "marmxxyy" is farther than accept cutoff but within NEAR_MISS_BAND of "marmara".
+    assert is_near_miss_university("marmxxyy", unis) is True
+
+
+def test_should_return_false_when_input_is_far_from_every_university():
+    unis = [_uni("Boğaziçi Üniversitesi"), _uni("Marmara Üniversitesi")]
+    assert is_near_miss_university("yeriniz nerde", unis) is False
+
+
+def test_should_return_false_when_input_is_too_short():
+    unis = [_uni("Boğaziçi Üniversitesi")]
+    assert is_near_miss_university("bou", unis) is False
+
+
+def test_should_return_false_when_input_is_an_exact_match():
+    unis = [_uni("Boğaziçi Üniversitesi")]
+    assert is_near_miss_university("Boğaziçi", unis) is False
+
+
+def test_should_return_false_when_input_would_match_via_levenshtein_tier():
+    unis = [_uni("Yıldız Teknik Üniversitesi")]
+    # Within accept cutoff — match_university handles this; near-miss must not fire.
+    result = match_university("Yıdız Teknik", unis, [])
+    assert result.confidence == MatchConfidence.LEVENSHTEIN
+    assert is_near_miss_university("Yıdız Teknik", unis) is False
+
+
+def test_near_miss_constants_are_documented():
+    assert NEAR_MISS_BAND == 2
+    assert NEAR_MISS_MIN_LEN == 4

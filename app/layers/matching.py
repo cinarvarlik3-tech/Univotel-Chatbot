@@ -15,9 +15,11 @@ from typing import Iterator, Optional
 from rapidfuzz.distance import Levenshtein as _Lev
 levenshtein_distance = _Lev.distance
 
-from app.db.models import Hotel, OutOfCityUniversity, University, UniversityAlias
+from app.db.models import Hotel, OutOfCityUniversity, University, UniversityAlias, UniversityParentMap
 
 LEVENSHTEIN_CUTOFF = 2  # legacy reference; comparisons use _get_levenshtein_cutoff()
+NEAR_MISS_BAND = 2  # extra Levenshtein distance beyond accept cutoff for answer-likelihood
+NEAR_MISS_MIN_LEN = 4  # inputs shorter than this never count as near-miss
 
 
 def _get_levenshtein_cutoff(normalized: str) -> int:
@@ -184,6 +186,51 @@ def match_out_of_city(
     return None
 
 
+def match_campus(
+    raw_text: str,
+    parent_university_id: uuid.UUID,
+    campuses: list[UniversityParentMap],
+    aliases: list[UniversityAlias],
+) -> Optional[UniversityParentMap]:
+    """
+    Match a campus label or alias scoped to a parent university.
+    Scans n-grams longest-first so campus names embedded in longer replies resolve.
+    """
+    if not campuses:
+        return None
+
+    scoped_aliases = [
+        a for a in aliases
+        if a.university_id and any(c.university_id == a.university_id for c in campuses)
+    ]
+
+    for candidate in scan_ngrams(raw_text):
+        normalized = normalize(candidate)
+        if not normalized:
+            continue
+        for campus in campuses:
+            if campus.parent_university_id != parent_university_id:
+                continue
+            if normalize(campus.campus_label) == normalized:
+                return campus
+            for alias in scoped_aliases:
+                if alias.university_id == campus.university_id and normalize(alias.alias) == normalized:
+                    return campus
+
+    normalized_full = normalize(raw_text)
+    if normalized_full:
+        for campus in campuses:
+            if campus.parent_university_id != parent_university_id:
+                continue
+            if normalize(campus.campus_label) == normalized_full:
+                return campus
+            for alias in scoped_aliases:
+                if alias.university_id == campus.university_id and normalize(alias.alias) == normalized_full:
+                    return campus
+
+    return None
+
+
 def scan_entities_by_ngram(
     text: str,
     universities: list[University],
@@ -224,3 +271,35 @@ def match_hotel_by_ngram(text: str, hotels: list[Hotel]) -> Optional[Hotel]:
 def word_count_after_normalize(text: str) -> int:
     """Token count after normalize(); used for invalid-university input handling."""
     return len(tokenize(text))
+
+
+def is_near_miss_university(
+    raw_text: str,
+    universities: list[University],
+    *,
+    band: int = NEAR_MISS_BAND,
+) -> bool:
+    """
+    True when raw_text is close enough to a known university name to plausibly
+    be a typo'd answer, but beyond the Levenshtein accept cutoff used by
+    match_university(). Used only after match_university() returns NONE.
+    """
+    normalized = normalize(raw_text)
+    if len(normalized) < NEAR_MISS_MIN_LEN:
+        return False
+
+    cutoff = _get_levenshtein_cutoff(normalized)
+    max_dist = cutoff + band
+
+    for uni in universities:
+        for candidate in (uni.name, uni.university_short_name):
+            if not candidate:
+                continue
+            norm_candidate = normalize(candidate)
+            if not norm_candidate:
+                continue
+            dist = levenshtein_distance(normalized, norm_candidate)
+            if cutoff < dist <= max_dist:
+                return True
+
+    return False

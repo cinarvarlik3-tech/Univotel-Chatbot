@@ -12,6 +12,8 @@ Contract (§4.1, §6.1):
 """
 import logging
 import re
+import asyncio
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -35,6 +37,74 @@ _NON_DIGIT = re.compile(r"\D")
 # Used when the conversation_updated payload does not include the acting agent.
 _recent_self_writes: dict[int, datetime] = {}
 _SELF_WRITE_TTL_SECONDS = 30
+
+
+@dataclass
+class _DebounceState:
+    """Buffered inbound fragments coalesced into one InfoGatherer turn (Spec 020 Part E)."""
+    conversation_id: Any
+    parts: list[str] = field(default_factory=list)
+    task: asyncio.Task | None = None
+    last_message_id: int | None = None
+
+
+_debounce_buffers: dict[int, _DebounceState] = {}
+
+
+def _cancel_debounce(chatwoot_conversation_id: int) -> None:
+    """Discard a pending debounce buffer (human takeover or terminal flush)."""
+    state = _debounce_buffers.pop(chatwoot_conversation_id, None)
+    if state and state.task and not state.task.done():
+        state.task.cancel()
+
+
+async def _flush_debounce(chatwoot_conversation_id: int) -> None:
+    """Process coalesced inbound content after the debounce window expires."""
+    state = _debounce_buffers.pop(chatwoot_conversation_id, None)
+    if not state or not state.parts:
+        return
+    combined = "\n".join(state.parts)
+    await _process_inbound(
+        conversation_id=state.conversation_id,
+        chatwoot_conversation_id=chatwoot_conversation_id,
+        content=combined,
+        chatwoot_message_id=state.last_message_id,
+    )
+
+
+async def _enqueue_debounced_inbound(
+    conversation_id,
+    chatwoot_conversation_id: int,
+    content: str,
+    chatwoot_message_id: int | None = None,
+) -> None:
+    """Append to per-conversation buffer and (re)start debounce timer."""
+    window = settings.debounce_window_seconds
+    if window <= 0:
+        await _process_inbound(
+            conversation_id, chatwoot_conversation_id, content, chatwoot_message_id
+        )
+        return
+
+    state = _debounce_buffers.get(chatwoot_conversation_id)
+    if state is None:
+        state = _DebounceState(conversation_id=conversation_id)
+        _debounce_buffers[chatwoot_conversation_id] = state
+
+    state.parts.append(content)
+    state.last_message_id = chatwoot_message_id
+
+    if state.task and not state.task.done():
+        state.task.cancel()
+
+    async def _timer() -> None:
+        try:
+            await asyncio.sleep(window)
+            await _flush_debounce(chatwoot_conversation_id)
+        except asyncio.CancelledError:
+            return
+
+    state.task = asyncio.create_task(_timer())
 
 
 def _normalize_phone(raw: str | None) -> str:
@@ -203,7 +273,10 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks):
                 conversation.id, sender_id,
             )
             await queries.set_conversation_stopped(conversation.id)
+            _cancel_debounce(chatwoot_conversation_id)
             sender_type_val = "user"
+            if chatwoot_message_id and not await queries.conversation_has_messages(conversation.id):
+                await queries.set_conversation_bot_enabled(conversation.id, False)
         else:
             sender_type_val = "infoGatherer"
 
@@ -222,7 +295,7 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks):
 
     if not is_private:
         background_tasks.add_task(
-            _process_inbound,
+            _enqueue_debounced_inbound,
             conversation_id=conversation.id,
             chatwoot_conversation_id=chatwoot_conversation_id,
             content=content or "",
@@ -295,6 +368,16 @@ async def _process_conversation_updated(payload: dict) -> None:
     kayip_nedeni = attrs.get("kayip_nedeni")
     oda_tiipi = attrs.get("oda_tiipi")
     butce = attrs.get("butce")
+    university_raw = attrs.get("university")
+    ogrenci_cinsiyet_raw = attrs.get("ogrenci_cinsiyet")
+
+    # Human removed info-check (spec 018)
+    prior_labels = conversation.labels or []
+    if labels is not None and "info-check" in prior_labels and "info-check" not in labels:
+        await queries.set_info_check_suppressed_from_dismiss(
+            conversation.id,
+            conversation.info_check_fingerprint,
+        )
 
     # Parse date if string
     from datetime import date
@@ -307,12 +390,51 @@ async def _process_conversation_updated(payload: dict) -> None:
     elif isinstance(tasinma_tarihi_raw, date):
         tasinma_tarihi = tasinma_tarihi_raw
 
+    now = datetime.now(tz=timezone.utc)
+
     # ilgili_otel companions: human/CRM edits arrive here — update atomically (§6.7)
     ilgili_otel_set_at = None
     ilgili_otel_set_by = None
     if ilgili_otel is not None and ilgili_otel != conversation.ilgili_otel:
-        ilgili_otel_set_at = datetime.now(tz=timezone.utc)
+        ilgili_otel_set_at = now
         ilgili_otel_set_by = "human"
+
+    university_id = None
+    university_set_at = None
+    university_set_by = None
+    if "university" in attrs:
+        if isinstance(university_raw, str) and university_raw.strip():
+            mapped = await queries.get_university_id_for_chatwoot_list_value(university_raw.strip())
+            if mapped:
+                university_id = mapped
+                university_set_at = now
+                university_set_by = "human"
+            else:
+                logger.warning(
+                    "WEBHOOK: unknown Chatwoot university value %r — skipping FK update",
+                    university_raw,
+                )
+
+    gender_key_present = "ogrenci_cinsiyet" in attrs
+    if gender_key_present:
+        from app.tagassigner.attribute_helpers import gender_display_to_enum
+        try:
+            gender_val = gender_display_to_enum(ogrenci_cinsiyet_raw or "Bilinmiyor")
+        except ValueError:
+            logger.warning(
+                "WEBHOOK: unknown ogrenci_cinsiyet value %r — skipping",
+                ogrenci_cinsiyet_raw,
+            )
+            gender_key_present = False
+            gender_val = None
+    else:
+        gender_val = None
+
+    oda_tiipi_set_at = None
+    oda_tiipi_set_by = None
+    if oda_tiipi is not None and oda_tiipi != conversation.oda_tiipi:
+        oda_tiipi_set_at = now
+        oda_tiipi_set_by = "human"
 
     await queries.sync_conversation_labels_and_attributes(
         conversation_id=conversation.id,
@@ -324,7 +446,18 @@ async def _process_conversation_updated(payload: dict) -> None:
         kayip_nedeni=kayip_nedeni,
         oda_tiipi=oda_tiipi,
         butce=butce,
+        university_id=university_id,
+        gender=None,
+        university_set_at=university_set_at,
+        university_set_by=university_set_by,
+        gender_set_at=None,
+        gender_set_by=None,
+        oda_tiipi_set_at=oda_tiipi_set_at,
+        oda_tiipi_set_by=oda_tiipi_set_by,
     )
+
+    if gender_key_present:
+        await queries.set_conversation_gender_human(conversation.id, gender_val)
 
     # 'tag' label → manual trigger (TagAssigner removes it during the run)
     if labels and "tag" in labels:
