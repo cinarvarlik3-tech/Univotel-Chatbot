@@ -10,6 +10,7 @@ from app.tagassigner.label_resolver import (
     LIST_3_NEVER_TOUCH,
     resolve_labels,
     remove_tag_trigger_label,
+    strip_gemini_deal_awaiting,
 )
 
 
@@ -313,3 +314,23 @@ def test_remove_tag_trigger_label_absent():
 
 def test_remove_tag_trigger_label_empty():
     assert remove_tag_trigger_label([]) == []
+
+
+def test_strip_gemini_deal_awaiting():
+    assert strip_gemini_deal_awaiting(["ogrenci", "deal_awaiting"]) == ["ogrenci"]
+
+
+def test_deal_awaiting_preserved_when_gemini_omits():
+    before = ["deal_awaiting", "whatsapp"]
+    proposed = ["ogrenci"]
+    result = resolve_labels(before, proposed)
+    assert "deal_awaiting" in result
+    assert "whatsapp" in result
+
+
+def test_deal_awaiting_not_added_by_gemini_proposal():
+    before = []
+    proposed = ["deal_awaiting", "ogrenci"]
+    result = resolve_labels(before, proposed)
+    assert "deal_awaiting" not in result
+    assert "ogrenci" in result

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# tag — wrapper around scripts/tag.py, runs inside the project venv.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$DIR/venv/bin/python3" "$DIR/scripts/tag.py" "$@"

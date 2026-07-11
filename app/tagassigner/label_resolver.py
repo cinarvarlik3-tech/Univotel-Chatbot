@@ -24,6 +24,13 @@ LIST_2_TERMINAL: frozenset[str] = frozenset([
     "kapora-alindi", "sozlesme-imzalandi", "kayıp", "ziyaret-ama-almayacak",
 ])
 
+# Router-owned labels — never assigned by Gemini, never removed by resolve_labels.
+ROUTER_OWNED_NEVER_REMOVE: frozenset[str] = frozenset([
+    "deal_awaiting",
+])
+
+DEAL_AWAITING_LABEL = "deal_awaiting"
+
 LIST_3_NEVER_TOUCH: frozenset[str] = frozenset([
     # Source/channel (CRM-owned)
     "google-ads", "google-maps", "meta-ads", "instagram",
@@ -82,12 +89,13 @@ def resolve_labels(
     """
     proposed_set = set(proposed)
 
-    # Step 1: strip List-3 from proposed
+    # Step 1: strip List-3 and Router-owned labels from proposed
     proposed_set -= LIST_3_NEVER_TOUCH
+    proposed_set -= ROUTER_OWNED_NEVER_REMOVE
 
-    # Step 2: terminal hard-guard — re-add List-2 labels that were present before
+    # Step 2: terminal / Router-owned hard-guard — re-add labels present in before
     before_set = set(before)
-    for terminal in LIST_2_TERMINAL:
+    for terminal in LIST_2_TERMINAL | ROUTER_OWNED_NEVER_REMOVE:
         if terminal in before_set and terminal not in proposed_set:
             proposed_set.add(terminal)
 
@@ -215,3 +223,8 @@ def _apply_one_only_mutex(
 def remove_tag_trigger_label(labels: list[str]) -> list[str]:
     """Remove the manual 'tag' label that triggered this run."""
     return [l for l in labels if l != "tag"]
+
+
+def strip_gemini_deal_awaiting(proposed_labels: list[str]) -> list[str]:
+    """Remove deal_awaiting if Gemini incorrectly proposed it."""
+    return [l for l in proposed_labels if l != DEAL_AWAITING_LABEL]

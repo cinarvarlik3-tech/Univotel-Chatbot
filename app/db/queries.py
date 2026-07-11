@@ -61,6 +61,13 @@ async def get_conversation_by_chatwoot_id(chatwoot_id: int) -> Optional[Conversa
     return Conversation(**dict(row)) if row else None
 
 
+async def count_live_testing_conversations() -> int:
+    """Total rows in conversations — live-testing ingestion budget (Spec 022)."""
+    pool = get_pool()
+    row = await pool.fetchrow("SELECT count(*) AS n FROM conversations")
+    return int(row["n"]) if row else 0
+
+
 async def upsert_conversation(chatwoot_id: int, contact_phone: Optional[str] = None) -> Conversation:
     pool = get_pool()
     await pool.execute(
@@ -499,6 +506,82 @@ async def get_conversations_eligible_for_nightly_batch() -> list[Conversation]:
     else:
         rows = await pool.fetch(base_sql)
 
+    return [Conversation(**dict(r)) for r in rows]
+
+
+_IN_FLIGHT_QUEUE_STATUSES = ("pending", "processing", "submitted", "awaiting_results")
+
+_IN_FLIGHT_QUEUE_GUARD = """
+    NOT EXISTS (
+        SELECT 1 FROM tag_assigner_queue q
+        WHERE q.conversation_id = c.id
+          AND q.status IN ('pending', 'processing', 'submitted', 'awaiting_results')
+    )
+"""
+
+
+async def get_conversations_for_sweep(limit: Optional[int] = None) -> list[Conversation]:
+    """sweep: any conversation not in-flight on the queue, oldest first."""
+    from app.config import settings, TESTING_PHONE_ALLOWLIST
+    pool = get_pool()
+    conds = [_IN_FLIGHT_QUEUE_GUARD]
+    params: list = []
+    if settings.testing_limitations_mode:
+        params.append(list(TESTING_PHONE_ALLOWLIST))
+        conds.append(f"c.contact_phone = ANY(${len(params)}::text[])")
+    sql = f"SELECT * FROM conversations c WHERE {' AND '.join(conds)} ORDER BY c.created_at ASC"
+    if limit is not None:
+        params.append(limit)
+        sql += f" LIMIT ${len(params)}"
+    rows = await pool.fetch(sql, *params)
+    return [Conversation(**dict(r)) for r in rows]
+
+
+async def get_conversations_for_sweep_empty(limit: Optional[int] = None) -> list[Conversation]:
+    """sweepEmpty: conversations with NO labels at all, oldest first."""
+    from app.config import settings, TESTING_PHONE_ALLOWLIST
+    pool = get_pool()
+    conds = [
+        "(c.labels IS NULL OR cardinality(c.labels) = 0)",
+        _IN_FLIGHT_QUEUE_GUARD,
+    ]
+    params: list = []
+    if settings.testing_limitations_mode:
+        params.append(list(TESTING_PHONE_ALLOWLIST))
+        conds.append(f"c.contact_phone = ANY(${len(params)}::text[])")
+    sql = f"SELECT * FROM conversations c WHERE {' AND '.join(conds)} ORDER BY c.created_at ASC"
+    if limit is not None:
+        params.append(limit)
+        sql += f" LIMIT ${len(params)}"
+    rows = await pool.fetch(sql, *params)
+    return [Conversation(**dict(r)) for r in rows]
+
+
+async def get_conversations_for_sweep_safe(limit: Optional[int] = None) -> list[Conversation]:
+    """
+    sweepSafe: conversations with NO successful tag_assigner_runs row whose
+    completed_at is within the last 24 hours. Oldest first.
+    """
+    from app.config import settings, TESTING_PHONE_ALLOWLIST
+    pool = get_pool()
+    conds = [
+        """NOT EXISTS (
+            SELECT 1 FROM tag_assigner_runs r
+            WHERE r.conversation_id = c.id
+              AND r.status = 'success'
+              AND r.completed_at > now() - interval '24 hours'
+        )""",
+        _IN_FLIGHT_QUEUE_GUARD,
+    ]
+    params: list = []
+    if settings.testing_limitations_mode:
+        params.append(list(TESTING_PHONE_ALLOWLIST))
+        conds.append(f"c.contact_phone = ANY(${len(params)}::text[])")
+    sql = f"SELECT * FROM conversations c WHERE {' AND '.join(conds)} ORDER BY c.created_at ASC"
+    if limit is not None:
+        params.append(limit)
+        sql += f" LIMIT ${len(params)}"
+    rows = await pool.fetch(sql, *params)
     return [Conversation(**dict(r)) for r in rows]
 
 

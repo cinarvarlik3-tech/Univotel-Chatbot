@@ -17,7 +17,12 @@ from app.config import settings, TESTING_PHONE_ALLOWLIST
 from app.db import queries
 from app.db.models import Conversation, TagAssignerLog
 from app.chatwoot_client import get_labels, set_labels
-from app.tagassigner.label_resolver import resolve_labels, remove_tag_trigger_label
+from app.tagassigner.label_resolver import (
+    resolve_labels,
+    remove_tag_trigger_label,
+    strip_gemini_deal_awaiting,
+)
+from app.tagassigner.deal_awaiting import apply_deal_awaiting
 from app.tagassigner.payload_builder import build_payload
 from app.tagassigner.gemini_client import call_gemini
 from app.tagassigner.attribute_resolver import push_chatwoot_attribute_patches
@@ -141,7 +146,9 @@ async def apply_tagassigner_result(
     if current_labels is None:
         current_labels = await get_labels(conv.chatwoot_conversation_id) or conv.labels or []
 
-    labels_for_resolve = strip_gemini_info_check(result.labels)
+    labels_for_resolve = strip_gemini_deal_awaiting(
+        strip_gemini_info_check(result.labels)
+    )
     resolved = resolve_labels(current_labels, labels_for_resolve)
 
     university_display = await _university_display_for_conv(conv)
@@ -182,7 +189,7 @@ async def apply_tagassigner_result(
             added_at=info_decision.added_at,
         )
 
-    final_labels = info_decision.labels
+    final_labels = await apply_deal_awaiting(conv.university_id, info_decision.labels)
     if set(final_labels) != set(current_labels):
         success = await _write_labels_with_retry(
             conversation_id, run_id, conv.chatwoot_conversation_id, final_labels

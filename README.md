@@ -8,31 +8,36 @@ This README is the primary onboarding document for engineers new to the project.
 
 ## Current Project Stage (July 2026)
 
-**Deployment:** Single Railway web process, `TESTING_LIMITATIONS_MODE` on (2-phone allowlist). Chatwoot webhooks → InfoGatherer → RecEngine → canned hotel responses; TagAssigner runs in parallel via queue/idle scan.
+**Deployment:** Single Railway web process, `TESTING_LIMITATIONS_MODE` on (2-phone allowlist). Chatwoot webhooks → debounced InfoGatherer → RecEngine → canned hotel responses; TagAssigner runs in parallel via queue/idle scan.
 
 | Area | Status | Notes |
 |------|--------|-------|
-| **InfoGatherer** | Shipped | Phrase gate, matching, campus escalation, gender capture, two-strike clarify, out-of-city path |
-| **Answer-vs-off-script** | Shipped | `answer_classifier.py` — silent `human_needed` for true off-script; clarify path for answer attempts ([O-suite](docs/wa_test_off_script_detection.md) passed live) |
+| **InfoGatherer** | Shipped | Phrase gate, matching, campus escalation, gender capture, two-strike clarify, out-of-city path, **divergence recovery** (spec 019/020), inbound debounce |
+| **Divergence recovery** | Shipped | Gemini intent classifier + DB routing table → canned answer / re-anchor / escalate; Suite D-FIX2 verified (July 2026) |
 | **RecEngine** | Shipped | Gender + university → `priority_score` selection; retry ladder; deal_awaiting sentinels |
 | **TagAssigner (V1)** | Shipped in code | Router, label resolver, attribute merger, `info-check`, batch path (batch submit may be stubbed) |
-| **FallBack (V2)** | Not started | All “call FallBack” paths → silent `human_needed` today |
-| **Unit tests** | 198 passing | `pytest` — no CI wired yet |
-| **Live conversational tests** | F-suite + O-suite documented | [F1–F10](docs/wa_test_links.md), [O1–O10](docs/wa_test_off_script_detection.md) |
+| **Answer classifier** | Legacy / tests only | `answer_classifier.py` retained for unit tests; production `awaiting_university` path uses divergence recovery instead |
+| **FallBack (V2)** | Not started | Residual “call FallBack” paths → silent `human_needed` or divergence escalate |
+| **Unit tests** | 261 passing | `pytest` — no CI wired yet |
+| **Live conversational tests** | F-suite, O-suite, Suite D documented | [F1–F10](docs/wa_test_links.md), [O1–O10](docs/wa_test_off_script_detection.md), [Suite D-FIX2](docs/suite_D_FIX2_verification.md) |
 
 ### Blockers before production (`TESTING_LIMITATIONS_MODE=off`)
 
-1. **Migration 017** applied on ChatBot DB — without it, RecEngine callback fails on `ilgili_otel_set_by` CHECK (`conversations_ilgili_otel_set_by_check`). Migrations 015–016 also required for out-of-city and deal_awaiting label sentinel.
+1. **Migrations 001–021** applied on ChatBot DB — especially **013**, **014**, **015**, **016**, **017**, **018** (divergence), **020** (`messages.sent_at`). Without **017**, RecEngine callback fails on `ilgili_otel_set_by` CHECK.
 2. **Suite A & B** — hotel data-state audit + alias collision script exit 0.
 3. **Integrity check** clean boot with `INTEGRITY_CHECK_BYPASS=off`.
-4. **Product decisions** — see [Known Issues & Open Decisions](#known-issues--open-decisions) (RecEngine geography, national uni list, business-digression handling).
+4. **TagAssigner accuracy tuning** — batch on 20–100 historical leads before full launch (planned next step).
+5. **Product decisions** — see [Known Issues & Open Decisions](#known-issues--open-decisions) (RecEngine geography, phrase-gate warmth on first message).
 
 ### Recently completed (July 2026)
 
+- **Divergence recovery** (spec 019) — LLM classifier + `divergence_routing` table; price/location/payment/coverage intents answered mid-flow with re-anchor (migration 018).
+- **Spec 020.1 pre-ship fixes** — inverted no-match gate, punctuation in `normalize()`, İTÜ Ayazağa alias, question-form guard, alias fuzzy (dist-1) for parent-name typos.
+- **Inbound debounce** — coalesce rapid messages using Chatwoot `sent_at` cadence; per-conversation processing lock (migration 020).
+- **Coverage no-reanchor** — `logistics_coverage` in `awaiting_university` confirms Istanbul-only without re-asking university (migration 021).
 - Multi-filter **phrase gate** (fixes F-suite step-1 greeting failures).
 - **Invalid-input two-strike** for university/campus (`clarification_attempt`, migration 014).
 - **Out-of-city universities** table + `/istanbul` terminal path (migration 015).
-- **Answer classifier** — distinguishes slot-filling attempts from off-script questions mid-flow.
 - **TagAssigner attributes spec 018** — `set_by` companions, attribute merger, Router-owned `info-check` label.
 
 ---
@@ -84,12 +89,14 @@ Univotel's Chatwoot inbox receives high-volume, repetitive leads: a student mess
 | Send ordered canned property messages | InfoGatherer + `response_schemas` |
 | Assign CRM labels and attributes from chat | TagAssigner (Gemini) |
 | Hand off edge cases | `human_needed` escalation (FallBack in V2) |
-| Detect off-script replies mid slot-fill | `answer_classifier.py` → silent handoff (no bot message) |
+| Detect off-script replies mid slot-fill | Divergence recovery (Gemini classifier + routing table) |
+| Answer price/location/payment mid-flow | Divergence recovery → canned answer + re-anchor |
 
 ### What it deliberately does **not** do (yet)
 
 - Full LLM conversation recovery (FallBack V2 — today → silent `human_needed`)
-- Scripted responses for **business digressions** mid-flow (e.g. “konaklama arıyorum”, “fiyat bilgisi alabilir miyim” after university ask — currently same silent handoff as location questions; see open decision)
+- Scripted responses for **business digressions** on the **first message** when phrase gate matches (price/proximity filters → plain `hangi` instead of intent-flavored answer — see post-launch limitation)
+- General multi-intent consolidation when a lead sends several questions in one burst (partially handled by debounce coalescing; classifier picks one intent)
 - Post-completion “show me something else” without naming a hotel
 - Sales-action labels (`aranacak`, `arandi`, etc.) — not chat-observable until V2
 - Data deletion (KVKK: indefinite retention by policy)
@@ -98,7 +105,7 @@ Univotel's Chatwoot inbox receives high-volume, repetitive leads: a student mess
 
 | Layer | Module(s) | Status | Role |
 |-------|-----------|--------|------|
-| **InfoGatherer** | `info_gatherer.py`, `phrase_gate.py`, `answer_classifier.py`, `matching.py` | Production | Scripted state machine + first-message gate + off-script detection |
+| **InfoGatherer** | `info_gatherer.py`, `phrase_gate.py`, `matching.py`, `divergence_classifier.py`, `divergence_router.py` | Production | Scripted state machine + phrase gate + divergence recovery |
 | **RecEngine** | `app/layers/rec_engine.py` | Production | Filter hotels by gender + university; tie-break by `priority_score` |
 | **TagAssigner** | `app/tagassigner/*` | Production (V1) | Gemini proposes labels; router resolves conflicts and writes labels + attributes |
 | **FallBack** | Not implemented | Deferred (V2) | LLM recovery for off-script cases; today → `human_needed` |
@@ -138,11 +145,11 @@ The core pattern is **async request-reply**: webhook handlers return `200` immed
 ```
 Student WhatsApp message
   → Chatwoot
-  → POST /webhooks/chatwoot (HMAC verify, dedupe, upsert conversation)
+  → POST /webhooks/chatwoot (HMAC verify, debounce coalesce, dedupe, upsert conversation)
   → InfoGatherer state machine (background)
       → phrase_gate (first message only)
-      → matching.py (university)
-      → answer_classifier.py (off-script vs answer attempt, awaiting_university only)
+      → matching.py (university, alias fuzzy, question-form guard)
+      → divergence recovery (classifier + routing table) when slots not filled
       → canned responses OR campus question OR gender prompt
   → RecEngine (gender + university → hotel)
       → POST /internal/infogatherer/callback
@@ -215,7 +222,7 @@ cp .env.example .env
 # Edit .env with real values (see Environment Variables below)
 
 # 5. Apply migrations (manual — see Migrations section)
-# Run migrations/001 through migrations/017 in order via Supabase SQL editor.
+# Run migrations/001 through migrations/021 in order via Supabase SQL editor.
 # Also apply external seed files referenced in docs (parent universities, label maps).
 
 # 6. Run the server
@@ -229,7 +236,7 @@ curl http://localhost:8000/health
 ### First-run checklist
 
 - [ ] `DATABASE_URL` points to the ChatBot Supabase project
-- [ ] Migrations **001–017** applied (especially **013**, **014**, **015**, **016**, **017** on production-like DB)
+- [ ] Migrations **001–021** applied (especially **013–021** on production-like DB)
 - [ ] `INTEGRITY_CHECK_BYPASS=false` for a real boot test (app should start cleanly)
 - [ ] `TESTING_LIMITATIONS_MODE=true` until production sign-off
 - [ ] Chatwoot webhook URL points to your deployment's `/webhooks/chatwoot`
@@ -238,7 +245,7 @@ curl http://localhost:8000/health
 ### Running tests
 
 ```bash
-# Unit tests (198 tests; integration marker exists but no integration tests checked in)
+# Unit tests (261 tests; integration marker exists but no integration tests checked in)
 pytest
 
 # Include integration tests when added (requires live DATABASE_URL)
@@ -267,6 +274,7 @@ Copy `.env.example` to `.env`. All secrets live in environment variables only �
 | `MODEL_ID` | No | Default: `gemini-2.5-flash-lite` — keep as env constant, never hardcode |
 | `GEMINI_WEBHOOK_SECRET` | Batch | Base64-encoded symmetric secret for batch webhook verification |
 | `TAGASSIGNER_AUTO_RUNS` | No | `true`/`false` — idle scan + nightly batch (manual `tag` always works) |
+| `DEBOUNCE_WINDOW_SECONDS` | No | Default: `3` — coalesce rapid inbound messages by customer send cadence; `0` = disabled |
 | `LOG_LEVEL` | No | Default: `info` |
 | `TESTING_LIMITATIONS_MODE` | No | When `true`, only process two allowlisted phone numbers |
 | `INTEGRITY_CHECK_BYPASS` | No | When `true`, skip fatal boot integrity check |
@@ -310,11 +318,13 @@ Univotel Chatbot/
 │   │   ├── internal.py              # RecEngine start + InfoGatherer callback
 │   │   └── batch_results.py         # POST /webhooks/batch-results — Gemini batch callback
 │   ├── layers/
-│   │   ├── info_gatherer.py         # ContextRun state machine
-│   │   ├── answer_classifier.py     # Answer-vs-off-script after failed uni match
+│   │   ├── info_gatherer.py         # ContextRun state machine + divergence orchestration
 │   │   ├── phrase_gate.py           # First-message gate (7 filters + pre-conditions A/B)
+│   │   ├── divergence_classifier.py # Gemini intent classifier (spec 019)
+│   │   ├── divergence_router.py     # (intent × flow_state) → action lookup
+│   │   ├── answer_classifier.py     # Legacy answer-vs-off-script (tests only)
 │   │   ├── rec_engine.py            # Hotel selection by gender + university
-│   │   └── matching.py              # University matching + near-miss helper
+│   │   └── matching.py              # University matching, near-miss, question-form guard
 │   ├── background/
 │   │   ├── rec_engine_ladder.py     # 3×5s retry ladder for RecEngine
 │   │   ├── send_retry.py            # Chatwoot send retry (1s/2s/4s backoff)
@@ -335,11 +345,12 @@ Univotel Chatbot/
 │       ├── attribute_helpers.py     # Shared attribute normalization helpers
 │       ├── info_check.py            # Router-owned info-check label logic
 │       └── conflict.py              # Option-A timestamp conflict rule for ilgili_otel
-├── migrations/                      # 17 SQL migrations (001–017), applied manually
-├── tests/                           # 14 unit test modules (~198 tests)
+├── migrations/                      # 21 SQL migrations (001–021), applied manually
+├── tests/                           # 20 unit test modules (261 tests)
 ├── docs/                            # Specs, audits, test plans, SQL audit scripts
 ├── system_prompts/
-│   └── tagassigner_prompt.md        # Gemini system prompt for TagAssigner
+│   ├── tagassigner_prompt.md        # Gemini system prompt for TagAssigner
+│   └── divergence_classifier_prompt.md  # Gemini prompt for divergence intent classification
 ├── scripts/
 │   └── testclean.py                 # Test conversation cleanup utility
 ├── requirements.txt
@@ -353,15 +364,19 @@ Univotel Chatbot/
 | File | Why |
 |------|-----|
 | `app/main.py` | App entry, lifespan, all background task startup |
-| `app/layers/info_gatherer.py` | Core business logic — state machine |
+| `app/layers/info_gatherer.py` | Core business logic — state machine + divergence pipeline |
 | `app/layers/phrase_gate.py` | First-inbound phrase gate — 7 filters + pre-conditions |
-| `app/layers/answer_classifier.py` | Answer-vs-off-script detection after failed university match |
+| `app/layers/divergence_classifier.py` | Mid-flow intent classification (Gemini) |
+| `app/layers/divergence_router.py` | Divergence routing table lookup |
+| `app/layers/matching.py` | University matching, alias fuzzy, question-form guard |
 | `app/db/queries.py` | Every database operation |
-| `app/webhooks/chatwoot.py` | Inbound message handling, dedupe, testing gate |
+| `app/webhooks/chatwoot.py` | Inbound message handling, debounce, dedupe, testing gate |
 | `app/tagassigner/router.py` | TagAssigner pipeline orchestration |
 | `docs/univotel-chatbot-spec.md` | V0 master spec |
 | `docs/chatbot-phrase-gate-and-matching-spec.md` | Phrase gate, clarification, matching spec |
-| `docs/matching-fixes-impl-spec.md` | Matching/clarification fixes (implemented July 2026) |
+| `docs/019_divergence_recovery_spec.md` | Divergence classifier + routing design |
+| `docs/020_1_final_preship_fixes_spec.md` | Pre-ship matching/divergence fixes (implemented) |
+| `docs/suite_D_FIX2_verification.md` | Live verification checklist for divergence (passed) |
 | `docs/018_tagassigner_attributes_info_check_spec.md` | TagAssigner attributes, set_by, info-check |
 | `docs/tagassigner-v1-spec.md` | V1 TagAssigner spec |
 | `docs/v1-audit.md` | Production readiness audit |
@@ -386,9 +401,12 @@ FastAPI also exposes `/docs`, `/redoc`, `/openapi.json` automatically.
 
 1. Verify HMAC (`X-Chatwoot-Signature` over `timestamp.body`) — failure → `401`
 2. Return `200` immediately; process in `BackgroundTasks`
-3. Dedupe on `chatwoot_message_id`
-4. Upsert conversation on first sight
-5. **Testing gate**: silently ignore non-allowlisted phones when testing mode is on
+3. Parse Chatwoot `created_at` → `sent_at` (customer send time for debounce)
+4. **Inbound debounce** (when `DEBOUNCE_WINDOW_SECONDS > 0`): buffer rapid messages per conversation, flush after cadence window elapses; coalesced content processed as one turn. Human takeover cancels the buffer.
+5. **Per-conversation lock** serializes `_process_inbound` to prevent race conditions on burst messages
+6. Dedupe on `chatwoot_message_id`
+7. Upsert conversation on first sight (moved to flush path for debounced inbound)
+8. **Testing gate**: silently ignore non-allowlisted phones when testing mode is on
 
 **Event: `message_created`**
 
@@ -484,25 +502,49 @@ InfoGatherer is a **finite state machine** with optimistic locking via `update_c
 
 Once `university_id` and `gender` are confirmed → fire RecEngine (state → `recengine_running`).
 
-### Answer-vs-off-script classifier (`answer_classifier.py`)
+### Uniform pre-RecEngine turn (`_process_pre_recengine_turn`)
 
-Runs **only** in `awaiting_university`, **after** `match_university()` and `match_out_of_city()` both return no match. Matching hierarchy is unchanged — the classifier never runs when a university resolves.
+Used for `new`, `awaiting_university`, `awaiting_university_clarification`, `awaiting_campus_clarification`, and `awaiting_gender`. Order on every turn:
 
-**Decision order** (biased toward not treating off-script as bad university names):
+1. **Hotel interrupt** — `match_hotel_by_ngram()` on any message → direct hotel path
+2. **Deterministic extraction** — gender → university/campus/OOC matching (`_run_deterministic_extraction`)
+3. **Divergence recovery** — if extraction returns `none`, run classifier + router (unless `if_empty=activate` on phrase-gate `GREETING` in `new`)
 
-1. **Off-script markers** → silent `human_needed` (`internal_class=off_script_no_answer`, no Chatwoot message): WH-words, request verbs (`arıyorum`, `alabilir miyim`), third-person referents (`kızım`), question clitics, trailing `?`
-2. **Near-miss typo** (`is_near_miss_university` in `matching.py`) → answer attempt → two-strike clarify
-3. **Short reply** (≤2 tokens after normalize) → answer attempt
-4. **Education vocabulary** (`üniversite`, `fakülte`, …) → answer attempt (long fake uni names)
-5. **Otherwise** (long rambling, no answer shape) → silent handoff
+**Question-form guard:** In `awaiting_university`, messages with standalone Turkish interrogative particles (`mi`/`mu`/…) or trailing `?` skip university entity acceptance and route to divergence — prevents `"sadece İstanbul mu?"` from matching İstanbul Üniversitesi.
 
-**Gender path:** Non-matching replies in `awaiting_gender` → immediate silent handoff (same `internal_class`). No reprompt.
+### Divergence recovery (spec 019/020)
 
-**Not wired in:** `awaiting_university_clarification`, `awaiting_campus_clarification` (existing two-strike behavior unchanged).
+When slot extraction finds no match, `_run_divergence_recovery` runs:
 
-**FallBack V2 seam:** `off_script_no_answer` escalation is the single hook for future LLM recovery.
+```
+message
+  → divergence_classifier.classify()  (Gemini → Intent enum)
+  → near-miss fallback (name typos only, when intent is no_intent/complex)
+  → divergence persistence (same intent ×3 → escalate on answer_and_reanchor)
+  → divergence_router.route(intent, flow_state)  (DB table, no LLM)
+  → execute: answer_and_reanchor | activate_flow | ignore | escalate
+```
 
-Live validation: [`docs/wa_test_off_script_detection.md`](docs/wa_test_off_script_detection.md) (O1–O10, all passed July 2026).
+**Intents:** `price`, `location`, `logistics_coverage`, `logistics_payment`, `housing`, `vacancy`, `parent_shopping`, `logistics_eligibility`, `no_intent`, `complex`, `non_turkish`.
+
+**Persistence:** `last_divergence_intent` + `divergence_repeat_count` on `conversations`. Same intent repeated with no slot progress: turn 1 → primary canned, turn 2 → alternate canned, turn 3 → silent escalate. Counter resets on any successful slot fill.
+
+**Routing actions:**
+
+| Action | Behavior |
+|--------|----------|
+| `answer_and_reanchor` | Send divergence canned (primary or alt by repeat count); state unchanged except `new` → `awaiting_university` |
+| `activate_flow` | Send the standard slot question for current state |
+| `ignore` | Log only (used for `no_intent` in `new`) |
+| `escalate` | Silent `human_needed` (missing routing row, repeat cap, or `complex`/`non_turkish`) |
+
+**Coverage exception (migration 021):** `logistics_coverage` in `awaiting_university` confirms Istanbul-only service without re-asking for university (out-of-city leads are not pursued).
+
+Live validation: [`docs/suite_D_FIX2_verification.md`](docs/suite_D_FIX2_verification.md) (Suite D-FIX2, passed July 2026).
+
+### Answer classifier (`answer_classifier.py`) — legacy
+
+Previously distinguished answer attempts from off-script questions in `awaiting_university`. **Production path now uses divergence recovery instead.** Module retained for unit tests ([O-suite](docs/wa_test_off_script_detection.md) documents the original behavior).
 
 ### Invalid input handling (`awaiting_university`, `awaiting_university_clarification`, `awaiting_campus_clarification`)
 
@@ -510,17 +552,14 @@ Requires migration **014** (`clarification_attempt` column + `clarify_*` canned 
 
 **University not matched** (`awaiting_university` or `awaiting_university_clarification`):
 
-After `match_university()` and `match_out_of_city()` both fail in `awaiting_university`, `classify_university_reply()` (`app/layers/answer_classifier.py`) splits the reply:
-
-| Classification | Behavior |
-|----------------|----------|
-| **Not an answer** (WH-question, request verb, third-person referent, `?`, or long rambling text with no education anchor) | Silent `_escalate_human_needed()` immediately — `internal_class=off_script_no_answer`, no Chatwoot message |
-| **Answer attempt** (near-miss typo, ≤2 words, or education vocabulary such as `university`/`üniversite`) | Existing two-strike clarify path below |
+After deterministic extraction returns `none`, divergence recovery runs first. If the classifier returns `no_intent` or `complex` and the message is a **name near-miss typo** (`is_near_miss_university`), the two-strike clarify path fires instead of escalating:
 
 | Attempt | Behavior |
 |---------|----------|
 | First | Send `clarify_uni_name`, increment `clarification_attempt`. If input is **> 2 words** after normalize, also advance to `awaiting_university_clarification`. If **≤ 2 words**, stay in `awaiting_university`. |
 | Second (`clarification_attempt >= 1`, or any failure in `awaiting_university_clarification`) | Silent `_escalate_human_needed()` — DB write only, no Chatwoot message |
+
+**Parent alias typos** (e.g. `Marmaraa` → `marmara`): resolved directly by **alias fuzzy match** (Tier 3.5, distance 1) → campus question, no clarify/escalate.
 
 **Levenshtein ambiguous tie** (any step): Send `clarify_uni`, state → `awaiting_university_clarification`. Second failure in that state → silent `human_needed`.
 
@@ -533,7 +572,7 @@ After `match_university()` and `match_out_of_city()` both fail in `awaiting_univ
 
 `clarification_attempt` resets on any successful university or campus match. Campus matching compares `campus_label` and campus-scoped aliases from `university_aliases` (e.g. `taşkışla` → İTÜ Maçka during campus clarification).
 
-**Gender not matched** (`awaiting_gender`): Silent `human_needed` (`internal_class=off_script_no_answer`).
+**Gender not matched** (`awaiting_gender`): If gender regex fails, divergence recovery runs (same pipeline as other pre-RecEngine states). Unhandled intents → silent `human_needed`.
 
 ### `deal_awaiting` path (post-RecEngine)
 
@@ -656,23 +695,27 @@ Pure function pipeline used by InfoGatherer and phrase gate. Fully unit-tested.
 ### Algorithm
 
 ```
-normalize(text)     # lowercase, strip Turkish diacritics, strip university suffixes
+normalize(text)     # lowercase, strip Turkish diacritics, strip punctuation, strip university suffixes
   → parent alias check FIRST (e.g. "itü" → parent_university_id for campus escalation)
   → Tier 1: exact match on universities.name / university_short_name
   → Tier 2: campus-level alias lookup (university_aliases)
-  → Tier 3: Levenshtein distance ≤ 2 (rapidfuzz)
+  → Tier 3: Levenshtein distance on university names (length-based cutoff via rapidfuzz)
       → exactly one hit: done
       → multiple equidistant hits: AMBIGUOUS → one clarification round
-      → zero hits: NONE → out-of-Istanbul or human_needed depending on context
+      → zero hits: continue
+  → Tier 3.5: alias fuzzy (distance 1 only, min length 4) on parent/campus alias strings
+      → e.g. "marmaraa" → parent alias "marmara"
+      → multiple distinct targets: AMBIGUOUS
+      → zero hits: NONE → out-of-city or divergence depending on context
 ```
 
 **Parent alias hoisting:** Parent-level aliases (e.g. `"itü"`) are checked **before** Tier 1 exact match. This prevents a campus `short_name` collision from skipping campus escalation.
 
 **Levenshtein cutoff:** Length-based via `_get_levenshtein_cutoff()` — ≤3 chars: 0 (Tier 3 disabled); 4–5 chars: 1; ≥6 chars: 2. Prevents short-input false positives (e.g. `"TÖÜ"` → `"tou"` no longer fuzzy-matches Koç `"ku"`). `LEVENSHTEIN_CUTOFF = 2` remains as a legacy reference for `phrase_gate.py` widget matching.
 
-**N-gram helpers:** `tokenize()`, `scan_ngrams()`, `scan_entities_by_ngram()`, `match_hotel_by_ngram()`, and `word_count_after_normalize()` support phrase-gate entity detection, hotel-name paths, and invalid-input word-count logic.
+**N-gram helpers:** `tokenize()`, `scan_ngrams()`, `scan_entities_by_ngram()`, `match_hotel_by_ngram()`, `word_count_after_normalize()`, and `is_question_form()` support phrase-gate entity detection, hotel-name paths, invalid-input word-count logic, and question-form guards.
 
-**Near-miss band:** `is_near_miss_university()` — typos beyond the accept cutoff but within `NEAR_MISS_BAND` (default 2) extra edits; used by answer classifier only.
+**Near-miss band:** `is_near_miss_university()` — typos beyond the name accept cutoff but within `NEAR_MISS_BAND` (default 2) extra edits; used by divergence near-miss fallback for **university name** typos only (alias typos resolve via Tier 3.5).
 
 **Out-of-city:** After Istanbul match fails, `match_out_of_city()` scans `out_of_city_universities` (migration 015) → send `istanbul` canned, state → `completed`.
 
@@ -848,7 +891,7 @@ V2 will also unlock sales-action labels (`aranacak`, `arandi`, etc.) via NetGSM/
 | Table | Purpose |
 |-------|---------|
 | `conversations` | Per-lead state machine, attributes, run counters |
-| `messages` | All inbound/outbound messages; dedupe on `chatwoot_message_id` |
+| `messages` | All inbound/outbound messages; dedupe on `chatwoot_message_id`; `sent_at` = Chatwoot customer send time (migration 020) |
 | `chatbot_logs` | Structured audit trail per layer |
 | `rec_engine_logs` | Idempotent RecEngine run tracking |
 | `canned_responses` | Message templates by `short_code` |
@@ -870,6 +913,22 @@ V2 will also unlock sales-action labels (`aranacak`, `arandi`, etc.) via NetGSM/
 | `tag_assigner_logs` | Per-request connection audit |
 | `hotel_chatwoot_label_map` | `hotels.id` → exact Chatwoot `ilgili_otel` list value |
 | `tag_assigner_queue` | Durable FIFO queue with dedupe |
+
+**Tier F — Divergence recovery** (migrations 018–018c, 021):
+
+| Table / change | Purpose |
+|----------------|---------|
+| `divergence_routing` | `(intent, flow_state)` → action + canned response FKs |
+| `conversations.bot_enabled` | Outbound-first conversations skip bot processing |
+| `conversations.last_divergence_intent`, `divergence_repeat_count` | Same-intent repeat tracking |
+| Canned `div_*` responses | Divergence answer + re-anchor copy (018, 018b, 021) |
+| `university_aliases` — `ayazağa` for İTÜ Maslak | Campus alias seed (018c) |
+
+**Tier G — Debounce** (migration 020):
+
+| Change | Purpose |
+|--------|---------|
+| `messages.sent_at` | Customer send timestamp from Chatwoot (debounce cadence anchor) |
 
 **Tier E — Parent-university escalation** (migration 011+):
 
@@ -894,7 +953,9 @@ V2 will also unlock sales-action labels (`aranacak`, `arandi`, etc.) via NetGSM/
 | `info_check_fingerprint`, `info_check_added_at`, `info_check_suppressed_fingerprint` | Router info-check state |
 | `tasinma_tarihi`, `kayip_nedeni`, `oda_tiipi`, `butce` | CRM attributes |
 | `pending_parent_university_id` | Campus escalation in progress |
-| `clarification_attempt` | Invalid campus reply retry counter (migration 014; reset on successful match) |
+| `clarification_attempt` | Invalid campus/university reply retry counter (migration 014; reset on successful match) |
+| `bot_enabled` | False for outbound-first conversations (migration 018) |
+| `last_divergence_intent`, `divergence_repeat_count` | Divergence same-intent persistence (migration 018) |
 | `reprompt_count`, `last_reprompt_sent_at` | Abandonment ladder |
 
 ### Entity relationships (simplified)
@@ -915,9 +976,9 @@ conversations → messages, rec_engine_logs, tag_assigner_runs, tag_assigner_que
 
 ## Migrations
 
-Migrations live in `migrations/` (001–017). **There is no automated migration runner** — apply manually via the Supabase SQL editor. Write migrations idempotently (`IF NOT EXISTS`) where possible.
+Migrations live in `migrations/` (001–021). **There is no automated migration runner** — apply manually via the Supabase SQL editor. Write migrations idempotently (`IF NOT EXISTS`) where possible.
 
-**Recommended apply order:** 001 → 017 sequentially. Migrations 016–017 were added after the original 001–014 sequence; do not skip them on production.
+**Recommended apply order:** 001 → 021 sequentially. Migrations 016–021 were added after the original 001–014 sequence; do not skip them on production.
 
 | # | File | Changes |
 |---|------|---------|
@@ -938,6 +999,12 @@ Migrations live in `migrations/` (001–017). **There is no automated migration 
 | 015 | `015_out_of_city_universities.sql` | `out_of_city_universities` table + 148-row seed |
 | 016 | `016_deal_awaiting_recengine.sql` | DEAL-AWAITING-LABEL-STATE sentinel + RecEngine wiring |
 | 017 | `017_tagassigner_attributes.sql` | `university/gender/oda_tiipi_set_by`, info-check state columns |
+| 018 | `018_divergence_routing.sql` | `divergence_routing` table, `bot_enabled`, divergence counters, seeded routing rows |
+| 018b | `018b_divergence_copy_fixes.sql` | Divergence canned response copy fixes |
+| 018c | `018c_itu_ayazaga_alias.sql` | İTÜ Maslak `ayazağa` campus alias |
+| 019 | `019_ilgili_otel_set_by_infogatherer.sql` | InfoGatherer `ilgili_otel_set_by` companion wiring |
+| 020 | `020_messages_sent_at.sql` | `messages.sent_at` for debounce cadence |
+| 021 | `021_coverage_no_reanchor.sql` | Coverage divergence copy without university re-ask |
 
 ### External seed files (referenced, may not be in repo)
 
@@ -949,7 +1016,7 @@ Apply separately in Supabase:
 
 ### Pre-flight before go-live
 
-- Migrations **001–017** applied on ChatBot DB
+- Migrations **001–021** applied on ChatBot DB
 - Migration 002: every hotel's `gender_scope` manually verified
 - Migration 003: GLOBAL-NULL-STATE exists and is wired
 - Migration 006 + 016: DEAL-AWAITING sentinels wired
@@ -957,6 +1024,9 @@ Apply separately in Supabase:
 - Migration 014: `clarify_uni`, `clarify_uni_name`, `clarify_campus_name` canned responses
 - Migration 015: `out_of_city_universities` populated
 - Migration 017: `*_set_by` CHECK constraints + info-check columns (required for RecEngine callback attribute writes)
+- Migration 018: `divergence_routing` seeded; `bot_enabled` column present
+- Migration 020: `messages.sent_at` column present (required for debounce)
+- Migration 021: coverage divergence copy updated (optional but recommended — already applied on prod)
 
 ---
 
@@ -1043,15 +1113,19 @@ Auth: `api_access_token: CHATWOOT_API_TOKEN`, 10s timeout.
 
 ## Testing
 
-### Test suite (198 tests, `pytest`)
+### Test suite (261 tests, `pytest`)
 
 | File | Covers |
 |------|--------|
-| `tests/test_matching.py` | University matching, n-gram helpers, near-miss, alias normalization |
+| `tests/test_matching.py` | University matching, n-gram helpers, near-miss, alias fuzzy, question-form guard |
 | `tests/test_phrase_gate.py` | Phrase gate filters and pre-conditions |
-| `tests/test_answer_classifier.py` | Answer-vs-off-script classification |
+| `tests/test_answer_classifier.py` | Legacy answer-vs-off-script classification |
+| `tests/test_divergence_classifier.py` | Divergence intent classifier parsing |
+| `tests/test_divergence_router.py` | Divergence routing table lookup |
+| `tests/test_divergence_persistence.py` | Same-intent repeat counter behavior |
+| `tests/test_debounce.py` | Inbound debounce, sent_at parsing, processing locks |
 | `tests/test_info_gatherer.py` | Extraction helpers (`_extract_university_candidate`, gender regex) |
-| `tests/test_info_gatherer_handlers.py` | Invalid-input handlers, off-script wiring, two-strike escalation |
+| `tests/test_info_gatherer_handlers.py` | Invalid-input handlers, divergence wiring, question-form guard |
 | `tests/test_rec_engine.py` | RecEngine hotel selection |
 | `tests/test_internal_callback.py` | InfoGatherer ↔ RecEngine callback |
 | `tests/test_security.py` | HMAC / secret verification |
@@ -1061,6 +1135,8 @@ Auth: `api_access_token: CHATWOOT_API_TOKEN`, 10s timeout.
 | `tests/test_payload_builder.py` | Gemini payload assembly |
 | `tests/test_attribute_merger.py` | Attribute merge + blocked mismatches (spec 018) |
 | `tests/test_info_check.py` | Router info-check label logic |
+| `tests/test_escalation_label.py` | Human-needed label write |
+| `tests/test_slot_skip.py` | Slot-skip edge cases |
 
 The `@pytest.mark.integration` marker is configured in `pytest.ini`, but **no integration tests are checked in yet**.
 
@@ -1089,7 +1165,11 @@ WhatsApp test links F1–F10. Phrase gate, matching, campus escalation, invalid-
 
 **Suite O — Off-script detection** ([`docs/wa_test_off_script_detection.md`](docs/wa_test_off_script_detection.md)):
 
-WhatsApp test links O1–O10. Answer classifier: silent handoff vs clarify path. **All passed live (July 2026).** Open product notes on O3/O4 (housing/price mid-flow) documented in that file.
+WhatsApp test links O1–O10. Documents original answer-classifier behavior; production now uses divergence recovery for mid-flow questions.
+
+**Suite D — Divergence recovery** ([`docs/suite_D_divergence_live_tests.md`](docs/suite_D_divergence_live_tests.md), [`docs/suite_D_FIX2_verification.md`](docs/suite_D_FIX2_verification.md)):
+
+Live tests for price/location/payment mid-flow, burst debounce, typo handling. **Suite D-FIX2 passed (July 2026).**
 
 **Mandatory teardown between live tests:**
 
@@ -1099,7 +1179,8 @@ SET flow_state = NULL, university_id = NULL, gender = NULL,
     pending_parent_university_id = NULL, ilgili_otel = NULL,
     ilgili_otel_set_at = NULL, ilgili_otel_set_by = NULL,
     auto_run_count = 0, manual_run_count = 0,
-    clarification_attempt = 0
+    clarification_attempt = 0,
+    last_divergence_intent = NULL, divergence_repeat_count = 0
 WHERE chatwoot_conversation_id = <your_test_cw_id>;
 ```
 
@@ -1145,12 +1226,13 @@ Failure → fatal log, app refuses to start (unless bypassed).
 
 ### Staged go-live sequence
 
-1. Apply migrations **001–017** on production ChatBot DB; verify 017 (`*_set_by` columns exist)
+1. Apply migrations **001–021** on production ChatBot DB; verify 017–021 applied
 2. Run Suites A & B; fix every finding
-3. Run F-suite + O-suite on allowlisted test phones with `INTEGRITY_CHECK_BYPASS=off`
+3. Run F-suite + Suite D-FIX2 on allowlisted test phones with `INTEGRITY_CHECK_BYPASS=off`
 4. Conv-52 smoke: `merhaba` → uni → campus (if parent) → gender → RecEngine → attributes in Chatwoot
-5. Widen allowlist → monitor logs → `TESTING_LIMITATIONS_MODE=off`
-6. Monitor first week: RecEngine candidate logs, integrity sweep, TagAssigner error rate, `off_script_no_answer` volume
+5. TagAssigner accuracy batch on 20–100 historical leads
+6. Capped launch (10 conversations) → patch loop → widen allowlist → `TESTING_LIMITATIONS_MODE=off`
+7. Monitor first week: RecEngine candidate logs, integrity sweep, TagAssigner error rate, divergence escalate volume
 
 ---
 
@@ -1163,27 +1245,30 @@ See [`docs/v1-audit.md`](docs/v1-audit.md) for the full audit. Summary before tu
 - [x] Phrase gate — multi-filter first-inbound gate (`phrase_gate.py`)
 - [x] F8-style invalid campus/university two-strike (clarify once → silent `human_needed`)
 - [x] Campus alias lookup in `awaiting_campus_clarification` (F6 path)
-- [x] Dynamic Levenshtein cutoff (short-input false-positive fix, e.g. TÖÜ vs Koç)
+- [x] Dynamic Levenshtein cutoff + alias fuzzy (dist-1) for parent-name typos
+- [x] Punctuation stripping in `normalize()` (comma'd messages like `İTÜ, kız`)
+- [x] Question-form guard (prevents false university match on coverage questions)
 - [x] Out-of-city university path (migration 015)
-- [x] Answer-vs-off-script classifier + O-suite live pass
+- [x] Divergence recovery — price/location/payment/coverage mid-flow (migration 018, Suite D-FIX2 passed)
+- [x] Inbound debounce anchored to Chatwoot `sent_at` (migration 020)
 - [x] TagAssigner attribute merger + info-check (spec 018, code complete)
-- [x] Unit test suite (198 tests passing locally)
+- [x] Unit test suite (261 tests passing locally)
 
 ### Must complete before production
 
-- [ ] **Migration 017** on production DB (RecEngine callback currently fails without it)
-- [ ] Migrations 015–016 confirmed on production DB
+- [ ] **Migrations 001–021** confirmed on production DB (especially 017–020)
 - [ ] Suite A (A1–A11) — zero rows on every check
 - [ ] Suite A12 — intended hotel at rank 1 for high-traffic campuses
 - [ ] Suite B — alias collision check exits 0
 - [ ] `INTEGRITY_CHECK_BYPASS=off` — clean boot
+- [ ] TagAssigner accuracy tuning on historical leads
 - [ ] `deal_awaiting_msg` copy finalized (migration 006 seed still `<TODO>`)
 
 ### Strongly recommended
 
-- [ ] Conv-52 end-to-end smoke after migration 017 applied
+- [ ] Conv-52 end-to-end smoke after all migrations applied
 - [ ] Turkish label round-trip verified against live Chatwoot
-- [ ] Decide O3/O4 product path (business digression vs silent handoff)
+- [ ] Capped launch (10 conversations) with observability queries ready
 - [ ] Silent `human_needed` paths documented for sales team (no outbound = intentional)
 
 ---
@@ -1218,32 +1303,26 @@ The multi-filter phrase gate accepts natural Turkish greetings, housing/proximit
 
 `_escalate_human_needed` updates DB + `human_needed` label only — **no Chatwoot message**. By design (leads should not perceive a bot failure).
 
-Affects: off-script in `awaiting_university`/`awaiting_gender`, second invalid campus/university reply, post-completion free text. First invalid **answer attempts** still get `clarify_*` canned responses.
+Affects: divergence escalate paths, second invalid campus/university reply, post-completion free text. First invalid **answer attempts** still get `clarify_*` canned responses.
 
-### Business digression mid-flow (O3/O4 — open product decision)
+### Business digression mid-flow (partially addressed)
 
-Live O-suite **passed** with silent handoff for:
+**Price/location/payment questions in `awaiting_university`** are now handled by divergence recovery (Suite D-FIX2 passed). Examples: `fiyat ne`, `konum neresi`, `ödeme nasıl` → canned answer + re-anchor.
 
-- `konaklama arıyorum` (housing intent after university ask)
-- `fiyat bilgisi alabilir miyim` (price inquiry after university ask)
+**Still open:**
 
-These are **high-intent business messages**, not random off-script. Phrase gate accepts similar wording on the **first** message; mid-flow they hit request-verb off-script markers.
+- **First-message warmth** — phrase-gate openers with price/proximity intent get plain `hangi` instead of intent-flavored answer (see post-launch limitation above).
+- **Multi-intent bursts** — debounce coalesces rapid messages, but classifier picks one intent; other questions in the burst may be skipped.
+- **Housing intent mid-flow** (`konaklama arıyorum`) — may still escalate depending on classifier output; not fully re-anchored like price/location.
 
-**Options under consideration** (not implemented):
-
-| Option | Customer sees | Sales sees |
-|--------|---------------|------------|
-| **A — Keep silent** (current) | Nothing until human replies | `human_needed` (+ optional intent labels) |
-| **B — Re-anchor canned** | One natural re-ask for university / price context | Lead stays in funnel |
-| **C — FallBack V2 slice** | LLM acknowledgment + re-ask | Same, with more variant coverage |
-
-See O3/O4 notes in [`docs/wa_test_off_script_detection.md`](docs/wa_test_off_script_detection.md).
+See O3/O4 notes in [`docs/wa_test_off_script_detection.md`](docs/wa_test_off_script_detection.md) for historical context.
 
 ### Open product decisions
 
 | Item | Question |
 |------|----------|
-| Business digression (O3/O4) | Silent handoff vs re-anchor canned vs FallBack? |
+| First-message warmth | Route price/proximity phrase-gate matches through divergence instead of plain `activate`? |
+| Multi-intent bursts | Consolidated canned when debounce coalesces several questions? |
 | RecEngine geography (F3) | Narrow `hotel_accessible_universities`? District-aware `priority_score`? |
 | Out-of-Istanbul (F10) | National list exists (015); second invalid uni still → silent handoff, not out-of-city |
 | National uni on first try | Real out-of-area name on first attempt → `/istanbul`; nonsense → clarify then silent |
@@ -1252,8 +1331,8 @@ See O3/O4 notes in [`docs/wa_test_off_script_detection.md`](docs/wa_test_off_scr
 
 | Gap | Detail |
 |-----|--------|
-| No CI | pytest exists (198 tests) but nothing runs on push/PR |
-| Migration 017 on prod | Code assumes `*_set_by` columns; verify before go-live |
+| No CI | pytest exists (261 tests) but nothing runs on push/PR |
+| Migrations 017–021 on prod | Code assumes divergence columns + `sent_at`; verify before go-live |
 | In-memory feedback-loop guard | `_recent_self_writes` breaks with multiple Railway replicas |
 | localhost internal HTTP | RecEngine callbacks via `http://localhost:{PORT}` — fragile multi-dyno |
 | Full-table loads per message | `get_all_hotels()`, `get_all_universities()`, … — needs caching at scale |
@@ -1283,12 +1362,17 @@ Resolves via Tier-2 alias in `match_university()` (direct from `awaiting_univers
 | [`docs/chatbot-phrase-gate-and-matching-spec.md`](docs/chatbot-phrase-gate-and-matching-spec.md) | Phrase gate, clarification flows, matching normalization |
 | [`docs/matching-fixes-impl-spec.md`](docs/matching-fixes-impl-spec.md) | Matching/clarification fixes (implemented) |
 | [`docs/wa_test_links.md`](docs/wa_test_links.md) | WhatsApp functional test links F1–F10 |
-| [`docs/wa_test_off_script_detection.md`](docs/wa_test_off_script_detection.md) | WhatsApp O1–O10 off-script / answer-classifier tests |
+| [`docs/019_divergence_recovery_spec.md`](docs/019_divergence_recovery_spec.md) | Divergence classifier + routing table design |
+| [`docs/020_1_final_preship_fixes_spec.md`](docs/020_1_final_preship_fixes_spec.md) | Pre-ship matching/divergence fixes (implemented) |
+| [`docs/suite_D_FIX2_verification.md`](docs/suite_D_FIX2_verification.md) | Live verification checklist for divergence (passed) |
+| [`docs/suite_D_divergence_live_tests.md`](docs/suite_D_divergence_live_tests.md) | Full Suite D divergence live test matrix |
+| [`docs/wa_test_off_script_detection.md`](docs/wa_test_off_script_detection.md) | WhatsApp O1–O10 (legacy answer-classifier era) |
 | [`docs/test_plan_flags_1_and_2.md`](docs/test_plan_flags_1_and_2.md) | Suite A/B/F definitions and exit criteria |
 | [`docs/test-and-fix-1.md`](docs/test-and-fix-1.md) | Conv-52 root-cause analysis and fix list |
 | [`docs/hotel_data_state_audit.sql`](docs/hotel_data_state_audit.sql) | Suite A SQL audit queries |
 | [`docs/alias_collision_check.py`](docs/alias_collision_check.py) | Suite B alias collision script |
 | [`system_prompts/tagassigner_prompt.md`](system_prompts/tagassigner_prompt.md) | Gemini system prompt for TagAssigner |
+| [`system_prompts/divergence_classifier_prompt.md`](system_prompts/divergence_classifier_prompt.md) | Gemini prompt for divergence intent classification |
 
 ---
 
@@ -1297,9 +1381,9 @@ Resolves via Tier-2 alias in `match_university()` (direct from `awaiting_univers
 When making changes:
 
 1. Read the relevant spec in `docs/` before modifying layer logic
-2. Run `pytest` before opening a PR (198 tests)
-3. For InfoGatherer/RecEngine changes: re-run conv-52 smoke + relevant F-suite cases
-4. For answer-classifier changes: run O-suite ([`docs/wa_test_off_script_detection.md`](docs/wa_test_off_script_detection.md))
+2. Run `pytest` before opening a PR (261 tests)
+3. For InfoGatherer/RecEngine changes: re-run conv-52 smoke + relevant F-suite / Suite D cases
+4. For divergence changes: run `tests/test_divergence_*.py`, `tests/test_debounce.py`, and Suite D-FIX2 live checklist
 5. For schema changes, add a new numbered migration file — do not edit applied migrations
 6. Keep `MODEL_ID` as an env constant; never hardcode Gemini model names
 7. Never commit secrets; verify `.env` is gitignored

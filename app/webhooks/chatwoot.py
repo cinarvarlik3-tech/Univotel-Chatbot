@@ -38,6 +38,22 @@ _NON_DIGIT = re.compile(r"\D")
 _recent_self_writes: dict[int, datetime] = {}
 _SELF_WRITE_TTL_SECONDS = 30
 
+_SWEEP_CHAT_REJECTION_MESSAGE = (
+    'You may only use "tag sweepSafe [limit]" or "tag sweepEmpty [limit]" from the chat, '
+    "with a maximum limit of 20. Input a numeric limit where the examples say [limit]. "
+    "Standart \"tag sweep\" operations and other operations with limit above 20 are guarded "
+    "terminal operations, contact your developer if you need them."
+)
+
+_SWEEP_OP_CANON: dict[str, str] = {
+    "sweep": "sweep",
+    "sweepempty": "sweepEmpty",
+    "sweepsafe": "sweepSafe",
+}
+_SWEEP_CHAT_ALLOWED = frozenset({"sweepEmpty", "sweepSafe"})
+_SWEEP_CHAT_DEFAULT_LIMIT = 20
+_SWEEP_CHAT_MAX_LIMIT = 20
+
 
 # Grace period (seconds) for burst siblings still stuck in our pipeline when a
 # message reaches the buffer having already consumed most of the debounce window.
@@ -239,6 +255,27 @@ def _is_allowed(payload: dict) -> bool:
     return False
 
 
+async def _is_live_testing_new_conversation_rejected(chatwoot_conversation_id: int) -> bool:
+    """
+    True when live-testing mode is on, this is a first-seen conversation, and the
+    total conversations row count has reached LIVE_TESTING_LIMIT (Spec 022).
+    """
+    if not settings.live_testing_mode:
+        return False
+    existing = await queries.get_conversation_by_chatwoot_id(chatwoot_conversation_id)
+    if existing is not None:
+        return False
+    current = await queries.count_live_testing_conversations()
+    limit = settings.live_testing_limit
+    if limit is not None and current >= limit:
+        logger.info(
+            "LIVE_TESTING_LIMIT reached (%d); rejecting new conversation %d",
+            limit, chatwoot_conversation_id,
+        )
+        return True
+    return False
+
+
 def record_self_write(chatwoot_conversation_id: int) -> None:
     """
     Called by the Router before each Chatwoot write.
@@ -256,6 +293,59 @@ def _is_recent_self_write(chatwoot_conversation_id: int) -> bool:
         _recent_self_writes.pop(chatwoot_conversation_id, None)
         return False
     return True
+
+
+def _parse_tag_private_note(content: str) -> dict[str, str | int] | None:
+    """
+    Parse a private-note tag command. Returns None if not a tag command.
+    Otherwise returns {"kind": "manual"|"sweep"|"reject", ...}.
+    """
+    tokens = content.strip().split()
+    if not tokens or tokens[0].lower() != "tag":
+        return None
+    if len(tokens) == 1:
+        return {"kind": "manual"}
+
+    op_raw = tokens[1].lower()
+    if op_raw == "sweep":
+        return {"kind": "reject"}
+
+    operation = _SWEEP_OP_CANON.get(op_raw)
+    if operation is None or operation not in _SWEEP_CHAT_ALLOWED:
+        return {"kind": "reject"}
+
+    limit = _SWEEP_CHAT_DEFAULT_LIMIT
+    if len(tokens) >= 3:
+        try:
+            limit = int(tokens[2])
+            if limit <= 0:
+                return {"kind": "reject"}
+        except ValueError:
+            return {"kind": "reject"}
+        if limit > _SWEEP_CHAT_MAX_LIMIT:
+            return {"kind": "reject"}
+
+    return {"kind": "sweep", "operation": operation, "limit": limit}
+
+
+async def _reject_tag_sweep_command(chatwoot_conversation_id: int) -> None:
+    from app.chatwoot_client import send_private_note
+    await send_private_note(chatwoot_conversation_id, _SWEEP_CHAT_REJECTION_MESSAGE)
+
+
+async def _process_tag_sweep_command(
+    chatwoot_conversation_id: int,
+    operation: str,
+    limit: int,
+) -> None:
+    from app.chatwoot_client import send_private_note
+    from app.tagassigner.sweep import run_sweep
+
+    count = await run_sweep(operation, limit)
+    await send_private_note(
+        chatwoot_conversation_id,
+        f"Sweep '{operation}' enqueued {count} conversation(s).",
+    )
 
 
 def _is_bot_authored(payload: dict) -> bool:
@@ -330,6 +420,9 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks):
         logger.fatal("WEBHOOK: cannot extract chatwoot_conversation_id — dropping")
         return JSONResponse(status_code=200, content={"status": "dropped_no_conversation_id"})
 
+    if await _is_live_testing_new_conversation_rejected(chatwoot_conversation_id):
+        return JSONResponse(status_code=200, content={"status": "live_testing_limit_reached"})
+
     message_payload = payload.get("message") or payload
     chatwoot_message_id: int | None = message_payload.get("id")
     content: str | None = message_payload.get("content")
@@ -364,21 +457,44 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks):
         conversation = await queries.upsert_conversation(chatwoot_conversation_id, contact_phone)
         logger.info("WEBHOOK: conversation upserted id=%s", conversation.id)
 
-        # Capture 'tag' private note → manual trigger (bypasses the 5-message gate)
-        if is_private and content and content.strip().lower() == "tag":
-            logger.info("WEBHOOK: 'tag' manual trigger detected for conversation %s", conversation.id)
-            if chatwoot_message_id:
-                await queries.insert_message(
-                    conversation.id, chatwoot_message_id, content,
-                    "inbound", "user", sender_id, sender_name, is_private=True, sent_at=sent_at,
-                )
-            background_tasks.add_task(
-                _process_manual_tag_trigger,
-                conversation_id=conversation.id,
-                chatwoot_conversation_id=chatwoot_conversation_id,
-            )
-            logger.info("WEBHOOK: 'tag' trigger enqueued as background task, returning 200")
-            return JSONResponse(status_code=200, content={"status": "ok"})
+        # Capture private-note tag commands (manual trigger or sweep)
+        if is_private and content:
+            tag_cmd = _parse_tag_private_note(content)
+            if tag_cmd is not None:
+                if tag_cmd["kind"] == "manual":
+                    logger.info(
+                        "WEBHOOK: 'tag' manual trigger detected for conversation %s",
+                        conversation.id,
+                    )
+                else:
+                    logger.info(
+                        "WEBHOOK: tag sweep command kind=%s for conversation %s",
+                        tag_cmd["kind"], conversation.id,
+                    )
+                if chatwoot_message_id:
+                    await queries.insert_message(
+                        conversation.id, chatwoot_message_id, content,
+                        "inbound", "user", sender_id, sender_name, is_private=True, sent_at=sent_at,
+                    )
+                if tag_cmd["kind"] == "manual":
+                    background_tasks.add_task(
+                        _process_manual_tag_trigger,
+                        conversation_id=conversation.id,
+                        chatwoot_conversation_id=chatwoot_conversation_id,
+                    )
+                elif tag_cmd["kind"] == "reject":
+                    background_tasks.add_task(
+                        _reject_tag_sweep_command,
+                        chatwoot_conversation_id=chatwoot_conversation_id,
+                    )
+                else:
+                    background_tasks.add_task(
+                        _process_tag_sweep_command,
+                        chatwoot_conversation_id=chatwoot_conversation_id,
+                        operation=tag_cmd["operation"],
+                        limit=tag_cmd["limit"],
+                    )
+                return JSONResponse(status_code=200, content={"status": "ok"})
 
         if our_message_type == "outbound":
             is_bot = sender_id and str(sender_id) == str(settings.chatwoot_bot_agent_id)

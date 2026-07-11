@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     testing_limitations_mode: bool = False
     integrity_check_bypass: bool = False
 
+    # Live testing (Spec 022): bounded real-traffic ingestion; mutually exclusive with testing_limitations_mode.
+    live_testing_mode: bool = False
+    live_testing_limit: Optional[int] = None
+
+    # When true, suppress all lead-facing messages via send_with_retry (labels/attributes/private notes still write).
+    outbound_block: bool = False
+
     # TagAssigner — Gemini
     model_id: str = "gemini-2.5-flash-lite"
     gemini_api_key: Optional[str] = None
@@ -43,6 +50,29 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def validate_config(
+    live_testing_mode: bool,
+    testing_limitations_mode: bool,
+    live_testing_limit: Optional[int],
+) -> None:
+    """
+    Boot-time config rules (Spec 022 Part A). Raises RuntimeError on misconfiguration.
+    """
+    if live_testing_mode and testing_limitations_mode:
+        logger = logging.getLogger(__name__)
+        logger.fatal(
+            "LIVE_TESTING_MODE and TESTING_LIMITATIONS_MODE cannot both be enabled"
+        )
+        raise RuntimeError(
+            "LIVE_TESTING_MODE and TESTING_LIMITATIONS_MODE cannot both be enabled"
+        )
+    if live_testing_mode and live_testing_limit is None:
+        logger = logging.getLogger(__name__)
+        logger.fatal("LIVE_TESTING_MODE is on but LIVE_TESTING_LIMIT is not set")
+        raise RuntimeError("LIVE_TESTING_MODE is on but LIVE_TESTING_LIMIT is not set")
+
 
 # Digits-only phone numbers permitted when testing_limitations_mode = True.
 # Single source of truth — imported by both the webhook handler and the DB query layer.

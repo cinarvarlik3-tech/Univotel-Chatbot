@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from app.chatwoot_client import send_message
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,13 @@ class SendRetryResult:
 
 
 async def send_with_retry(chatwoot_conversation_id: int, content: str) -> SendRetryResult:
+    if settings.outbound_block:
+        logger.info(
+            "OUTBOUND_BLOCK: suppressed message to conversation %s",
+            chatwoot_conversation_id,
+        )
+        return SendRetryResult(ok=True, final_status_code=0)
+
     last_error: Optional[str] = None
     last_status = 0
 

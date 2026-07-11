@@ -74,7 +74,7 @@ async def _drain_one() -> None:
             run_id=run_id,
             conversation_id=item.conversation_id,
             trigger_type=trigger_type,
-            read_full_history=(trigger_type in ("manual", "scheduled")),
+            read_full_history=(trigger_type in ("manual", "scheduled", "sweep")),
         )
     except Exception as exc:
         logger.error(

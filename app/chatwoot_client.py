@@ -56,6 +56,35 @@ async def send_message(chatwoot_conversation_id: int, content: str) -> SendResul
         return SendResult(ok=False, status_code=0, error=str(exc))
 
 
+async def send_private_note(chatwoot_conversation_id: int, content: str) -> SendResult:
+    """Post a private note on a conversation (operator commands / confirmations)."""
+    url = f"{_BASE}/api/v1/accounts/{_ACCOUNT}/conversations/{chatwoot_conversation_id}/messages"
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.post(
+                url,
+                json={"content": content, "message_type": "outgoing", "private": True},
+                headers=_HEADERS,
+            )
+        if resp.status_code == 200:
+            data = resp.json()
+            return SendResult(ok=True, status_code=200, message_id=data.get("id"))
+        logger.error(
+            "send_private_note: HTTP %d for conversation %d",
+            resp.status_code, chatwoot_conversation_id,
+        )
+        return SendResult(ok=False, status_code=resp.status_code, error=resp.text)
+    except httpx.TimeoutException:
+        logger.error("send_private_note: TIMEOUT for conversation %d", chatwoot_conversation_id)
+        return SendResult(ok=False, status_code=0, error="TIMEOUT")
+    except httpx.RequestError as exc:
+        logger.error(
+            "send_private_note: network error for conversation %d: %s",
+            chatwoot_conversation_id, exc,
+        )
+        return SendResult(ok=False, status_code=0, error=str(exc))
+
+
 async def set_custom_attribute(
     chatwoot_conversation_id: int, key: str, value: Any
 ) -> SendResult:
