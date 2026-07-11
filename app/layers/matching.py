@@ -20,6 +20,10 @@ from app.db.models import Hotel, OutOfCityUniversity, University, UniversityAlia
 LEVENSHTEIN_CUTOFF = 2  # legacy reference; comparisons use _get_levenshtein_cutoff()
 NEAR_MISS_BAND = 2  # extra Levenshtein distance beyond accept cutoff for answer-likelihood
 NEAR_MISS_MIN_LEN = 4  # inputs shorter than this never count as near-miss
+ALIAS_FUZZY_MAX_DIST = 1  # single-edit typos against alias strings (Tier 3.5)
+ALIAS_FUZZY_MIN_LEN = 4  # short aliases (itu, ku) stay exact-only
+
+_QUESTION_PARTICLES = frozenset({"mi", "mu"})
 
 
 def _get_levenshtein_cutoff(normalized: str) -> int:
@@ -60,10 +64,14 @@ class MatchResult:
 
 
 def normalize(text: str) -> str:
-    """Lowercase, strip Turkish diacritics, strip university suffixes, trim."""
+    """Lowercase, strip Turkish diacritics, strip punctuation, strip university suffixes, trim."""
     # İ (U+0130) lowercases to i+combining-dot in Python; replace it first.
     text = text.replace("İ", "i").replace("I", "ı")
-    text = text.lower().translate(_DIACRITIC_MAP).strip()
+    text = text.lower().translate(_DIACRITIC_MAP)
+    # Punctuation → space so tokens like "itu," don't diverge from "itu".
+    # Diacritics are already folded to ASCII above, so \w keeps letters/digits.
+    text = re.sub(r"[^\w\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
     for suffix in _SUFFIXES:
         if text.endswith(suffix):
             text = text[: -len(suffix)].strip()
@@ -79,6 +87,17 @@ def tokenize(text: str) -> list[str]:
     return normalized.split()
 
 
+def is_question_form(text: str) -> bool:
+    """
+    True when the message looks like a question rather than a slot answer.
+    Detects trailing '?' and standalone Turkish interrogative particles (mi/mu after
+    normalize — covers mı/mi/mu/mü). Attached forms like 'mısınız' are not detected.
+    """
+    if text.strip().endswith("?"):
+        return True
+    return any(token in _QUESTION_PARTICLES for token in tokenize(text))
+
+
 def scan_ngrams(text: str, min_n: int = 1, max_n: int = 4) -> Iterator[str]:
     """
     Yield contiguous word n-grams longest-first (max_n down to min_n).
@@ -91,6 +110,43 @@ def scan_ngrams(text: str, min_n: int = 1, max_n: int = 4) -> Iterator[str]:
     for n in range(upper, min_n - 1, -1):
         for i in range(len(words) - n + 1):
             yield " ".join(words[i : i + n])
+
+
+def _match_alias_fuzzy(
+    normalized: str,
+    aliases: list[UniversityAlias],
+) -> Optional[MatchResult]:
+    """
+    Tier 3.5 — distance-1 fuzzy match against alias strings when name Tier 3 misses.
+    Parent and campus aliases share one band; multiple distinct targets → AMBIGUOUS.
+    """
+    if len(normalized) < ALIAS_FUZZY_MIN_LEN:
+        return None
+
+    hits: set[tuple[str, uuid.UUID]] = set()
+    for alias in aliases:
+        norm_alias = normalize(alias.alias)
+        if len(norm_alias) < ALIAS_FUZZY_MIN_LEN:
+            continue
+        dist = levenshtein_distance(normalized, norm_alias)
+        if 0 < dist <= ALIAS_FUZZY_MAX_DIST:
+            if alias.parent_university_id:
+                hits.add(("parent", alias.parent_university_id))
+            elif alias.university_id:
+                hits.add(("campus", alias.university_id))
+
+    if not hits:
+        return None
+    if len(hits) > 1:
+        return MatchResult(confidence=MatchConfidence.AMBIGUOUS)
+
+    kind, target_id = next(iter(hits))
+    if kind == "parent":
+        return MatchResult(
+            confidence=MatchConfidence.ALIAS,
+            parent_university_id=target_id,
+        )
+    return MatchResult(confidence=MatchConfidence.ALIAS, university_id=target_id)
 
 
 def match_university(
@@ -136,6 +192,9 @@ def match_university(
             hits.append((dist, uni.id))
 
     if not hits:
+        alias_result = _match_alias_fuzzy(normalized, aliases)
+        if alias_result is not None:
+            return alias_result
         return MatchResult(confidence=MatchConfidence.NONE)
 
     min_dist = min(d for d, _ in hits)

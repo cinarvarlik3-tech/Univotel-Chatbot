@@ -16,6 +16,7 @@ from app.db.models import ChatbotLog, Conversation, DivergenceAction, RoutingDec
 from app.layers.matching import (
     MatchConfidence,
     is_near_miss_university,
+    is_question_form,
     match_campus,
     match_hotel_by_ngram,
     match_out_of_city,
@@ -24,7 +25,7 @@ from app.layers.matching import (
     word_count_after_normalize,
 )
 from app.layers.phrase_gate import PhraseGateAction, evaluate_phrase_gate
-from app.layers.answer_classifier import AnswerAssessment, classify_university_reply
+from app.layers.divergence_classifier import Intent
 from app.background.send_retry import send_with_retry
 
 logger = logging.getLogger(__name__)
@@ -230,47 +231,43 @@ async def _run_deterministic_extraction(
         return "clarify"
 
     if not conv.university_id:
-        result = scan_entities_by_ngram(content, all_unis, all_aliases)
-        if result.confidence == MatchConfidence.AMBIGUOUS:
-            advanced = await queries.update_conversation_state(
-                cid, "awaiting_university_clarification", conv.flow_state
-            )
-            if advanced:
-                await _send_canned(cwid, CANNED_CLARIFY)
-            await queries.reset_divergence_persistence(cid)
-            return "progress"
-
-        if result.parent_university_id:
-            if await _handle_parent_match(
-                conv, cwid, result.parent_university_id, content=content
-            ):
+        # Question-shaped replies skip university entity acceptance (gender still extracted above).
+        if not is_question_form(content):
+            result = scan_entities_by_ngram(content, all_unis, all_aliases)
+            if result.confidence == MatchConfidence.AMBIGUOUS:
+                advanced = await queries.update_conversation_state(
+                    cid, "awaiting_university_clarification", conv.flow_state
+                )
+                if advanced:
+                    await _send_canned(cwid, CANNED_CLARIFY)
                 await queries.reset_divergence_persistence(cid)
                 return "progress"
 
-        if result.university_id:
-            if await _route_university_match(conv, cwid, result):
-                entity_filled = True
-                fresh = await queries.get_conversation_by_id(cid)
-                if fresh:
-                    conv = fresh
-
-        if not entity_filled and result.confidence == MatchConfidence.NONE:
-            if flow_state in ("new", "awaiting_university", "awaiting_university_clarification"):
-                if match_out_of_city(content, all_ooc):
-                    await _fire_out_of_city(conv, cwid)
+            if result.parent_university_id:
+                if await _handle_parent_match(
+                    conv, cwid, result.parent_university_id, content=content
+                ):
                     await queries.reset_divergence_persistence(cid)
                     return "progress"
 
-            if flow_state == "awaiting_university":
-                assessment = classify_university_reply(content, all_unis)
-                if (
-                    assessment == AnswerAssessment.ANSWER_ATTEMPT
-                    or is_near_miss_university(content, all_unis)
-                ):
-                    await _handle_university_no_match(conv, cwid, content)
-                    return "clarify"
+            if result.university_id:
+                if await _route_university_match(conv, cwid, result):
+                    entity_filled = True
+                    fresh = await queries.get_conversation_by_id(cid)
+                    if fresh:
+                        conv = fresh
 
-            return "none"
+            if not entity_filled and result.confidence == MatchConfidence.NONE:
+                if flow_state in ("new", "awaiting_university", "awaiting_university_clarification"):
+                    if match_out_of_city(content, all_ooc):
+                        await _fire_out_of_city(conv, cwid)
+                        await queries.reset_divergence_persistence(cid)
+                        return "progress"
+
+                # No deterministic match. Everything (short, question-shaped, typo'd) goes to
+                # divergence. Near-miss typo detection re-enters as a fallback inside
+                # _run_divergence_recovery (Fix 1.2), never here.
+                return "none"
 
     if gender_filled or entity_filled:
         await queries.reset_divergence_persistence(cid)
@@ -445,6 +442,19 @@ async def _run_divergence_recovery(
         return
 
     intent = classification.intent
+
+    # Near-miss fallback (Fix 1.2): LLM found no real inquiry, but the message
+    # looks like a typo'd university name and the pending slot is university.
+    # Deterministic, DB-grounded; the LLM never names a university.
+    if (
+        intent in (Intent.NO_INTENT, Intent.COMPLEX)
+        and flow_state in ("awaiting_university", "awaiting_university_clarification")
+    ):
+        all_unis = await queries.get_all_universities()
+        if is_near_miss_university(content, all_unis):
+            await _handle_university_no_match(conversation, cwid, content)
+            return
+
     if conversation.last_divergence_intent == intent.value:
         repeat_count = conversation.divergence_repeat_count + 1
     else:

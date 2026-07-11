@@ -1190,6 +1190,14 @@ See [`docs/v1-audit.md`](docs/v1-audit.md) for the full audit. Summary before tu
 
 ## Known Issues & Open Decisions
 
+### Known Limitations — Post-Launch
+
+**Phrase-gate openers with commercial intent get a plain slot question instead of an intent-flavored answer.**
+
+Openers that trip a phrase-gate keyword filter — Filter 6 (proximity, e.g. "yakın") or Filter 7 (price/info, 2 of {fiyat, bilgi, icin}) — resolve to `GREETING` → `activate` → a plain `hangi` (university) question. The divergence classifier never runs on them, because it only fires on phrase-gate `IGNORE`. Result: a lead opening with "fiyat bilgisi alabilir miyim" or "daha yakın şubeniz var mı" is asked "hangi üniversite?" rather than receiving a price/location-flavored acknowledgment first. This is correct, non-dropping behavior (the flow continues, the answer arrives at the recommendation) and matches what a human agent would ask — it is a warmth/polish gap, not a failure.
+
+**Fix (deferred):** let openers that trip the price/proximity filters carry their intent into the divergence router instead of routing straight to `activate`. Cost: the divergence classifier (an LLM call) would run on more first messages, blurring the currently-clean phrase-gate/divergence separation on the hottest path. Deferred pending post-launch volume data on how often this pattern occurs.
+
 ### Migration 017 not applied (operational blocker)
 
 If migration **017** is missing on the ChatBot DB, RecEngine callback fails when writing InfoGatherer attribute companions:

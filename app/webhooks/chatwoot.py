@@ -39,16 +39,106 @@ _recent_self_writes: dict[int, datetime] = {}
 _SELF_WRITE_TTL_SECONDS = 30
 
 
+# Grace period (seconds) for burst siblings still stuck in our pipeline when a
+# message reaches the buffer having already consumed most of the debounce window.
+_MIN_FLUSH_DELAY = 1.0
+
+
+@dataclass
+class _DebounceFragment:
+    """A single buffered inbound message awaiting coalescing into one turn."""
+    content: str
+    chatwoot_message_id: int | None
+    sent_at: datetime
+    sender_id: str | None = None
+    sender_name: str | None = None
+
+
 @dataclass
 class _DebounceState:
     """Buffered inbound fragments coalesced into one InfoGatherer turn (Spec 020 Part E)."""
-    conversation_id: Any
-    parts: list[str] = field(default_factory=list)
+    chatwoot_conversation_id: int
+    contact_phone: str | None = None
+    fragments: list[_DebounceFragment] = field(default_factory=list)
     task: asyncio.Task | None = None
-    last_message_id: int | None = None
+    last_sent_at: datetime | None = None
 
 
 _debounce_buffers: dict[int, _DebounceState] = {}
+
+# Per-conversation processing locks. Serialize turns so a late flush or a
+# spaced follow-up message never runs process_message concurrently on stale state.
+_processing_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_processing_lock(chatwoot_conversation_id: int) -> asyncio.Lock:
+    """Return (creating if needed) the processing lock for a conversation."""
+    lock = _processing_locks.get(chatwoot_conversation_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _processing_locks[chatwoot_conversation_id] = lock
+    return lock
+
+
+def _coerce_timestamp(raw: Any) -> datetime | None:
+    """Best-effort parse of a Chatwoot timestamp into tz-aware UTC; None if unusable."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        seconds = float(raw)
+        if seconds > 1e12:  # epoch milliseconds
+            seconds /= 1000.0
+        try:
+            return datetime.fromtimestamp(seconds, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return None
+        if s.isdigit():
+            return _coerce_timestamp(int(s))
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    return None
+
+
+def _parse_sent_at(message_payload: dict, payload: dict) -> datetime:
+    """
+    Extract the customer's true send time from a Chatwoot message_created payload.
+    Chatwoot exposes the timestamp in a few shapes across versions (message.created_at
+    as epoch seconds, an ISO 8601 string, or a top-level created_at). Falls back to
+    now(UTC) if absent/unparseable so cadence timing never breaks the request path.
+    """
+    for raw in (
+        message_payload.get("created_at"),
+        payload.get("created_at"),
+        message_payload.get("timestamp"),
+    ):
+        parsed = _coerce_timestamp(raw)
+        if parsed is not None:
+            return parsed
+    return datetime.now(tz=timezone.utc)
+
+
+def _compute_flush_wait(
+    sent_at: datetime, window: float, now: datetime | None = None
+) -> float:
+    """
+    Seconds to wait before flushing, measured from the customer's send time.
+    Pipeline latency already elapsed counts against the window; the result is
+    floored at _MIN_FLUSH_DELAY so late-arriving burst siblings still coalesce.
+    """
+    now = now or datetime.now(tz=timezone.utc)
+    elapsed = (now - sent_at).total_seconds()
+    return max(_MIN_FLUSH_DELAY, window - elapsed)
 
 
 def _cancel_debounce(chatwoot_conversation_id: int) -> None:
@@ -61,45 +151,65 @@ def _cancel_debounce(chatwoot_conversation_id: int) -> None:
 async def _flush_debounce(chatwoot_conversation_id: int) -> None:
     """Process coalesced inbound content after the debounce window expires."""
     state = _debounce_buffers.pop(chatwoot_conversation_id, None)
-    if not state or not state.parts:
+    if not state or not state.fragments:
         return
-    combined = "\n".join(state.parts)
     await _process_inbound(
-        conversation_id=state.conversation_id,
         chatwoot_conversation_id=chatwoot_conversation_id,
-        content=combined,
-        chatwoot_message_id=state.last_message_id,
+        contact_phone=state.contact_phone,
+        fragments=list(state.fragments),
     )
 
 
 async def _enqueue_debounced_inbound(
-    conversation_id,
     chatwoot_conversation_id: int,
     content: str,
-    chatwoot_message_id: int | None = None,
+    chatwoot_message_id: int | None,
+    sent_at: datetime,
+    *,
+    contact_phone: str | None = None,
+    sender_id: str | None = None,
+    sender_name: str | None = None,
 ) -> None:
-    """Append to per-conversation buffer and (re)start debounce timer."""
+    """Append to the per-conversation buffer and (re)start a cadence-anchored timer."""
+    fragment = _DebounceFragment(
+        content=content,
+        chatwoot_message_id=chatwoot_message_id,
+        sent_at=sent_at,
+        sender_id=sender_id,
+        sender_name=sender_name,
+    )
+
     window = settings.debounce_window_seconds
     if window <= 0:
         await _process_inbound(
-            conversation_id, chatwoot_conversation_id, content, chatwoot_message_id
+            chatwoot_conversation_id=chatwoot_conversation_id,
+            contact_phone=contact_phone,
+            fragments=[fragment],
         )
         return
 
     state = _debounce_buffers.get(chatwoot_conversation_id)
     if state is None:
-        state = _DebounceState(conversation_id=conversation_id)
+        state = _DebounceState(chatwoot_conversation_id=chatwoot_conversation_id)
         _debounce_buffers[chatwoot_conversation_id] = state
 
-    state.parts.append(content)
-    state.last_message_id = chatwoot_message_id
+    if contact_phone:
+        state.contact_phone = contact_phone
+    state.fragments.append(fragment)
+    state.last_sent_at = sent_at
 
     if state.task and not state.task.done():
         state.task.cancel()
 
+    # Anchor the window to the customer's send time, not our arrival time: time our
+    # pipeline already burned counts against the window, so a burst still coalesces
+    # when per-message processing is slow. A floor keeps a grace period for late
+    # siblings and bounds how quickly we respond after the last message.
+    wait = _compute_flush_wait(sent_at, float(window))
+
     async def _timer() -> None:
         try:
-            await asyncio.sleep(window)
+            await asyncio.sleep(wait)
             await _flush_debounce(chatwoot_conversation_id)
         except asyncio.CancelledError:
             return
@@ -245,91 +355,129 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks):
         or (((payload.get("conversation") or {}).get("meta") or {}).get("sender") or {}).get("phone_number")
     )
     contact_phone = _normalize_phone(raw_phone) or None
-    logger.info("WEBHOOK: upserting conversation cw_id=%s phone=%r", chatwoot_conversation_id, contact_phone)
-    conversation = await queries.upsert_conversation(chatwoot_conversation_id, contact_phone)
-    logger.info("WEBHOOK: conversation upserted id=%s", conversation.id)
+    sent_at = _parse_sent_at(message_payload, payload)
 
-    # Capture 'tag' private note → manual trigger (bypasses the 5-message gate)
-    if is_private and content and content.strip().lower() == "tag":
-        logger.info("WEBHOOK: 'tag' manual trigger detected for conversation %s", conversation.id)
-        if chatwoot_message_id:
-            await queries.insert_message(
-                conversation.id, chatwoot_message_id, content,
-                "inbound", "user", sender_id, sender_name, is_private=True,
-            )
-        background_tasks.add_task(
+    # Private notes and outbound messages need synchronous handling (tag trigger,
+    # human-takeover detection, direct persistence) and are never debounced.
+    if is_private or our_message_type == "outbound":
+        logger.info("WEBHOOK: upserting conversation cw_id=%s phone=%r", chatwoot_conversation_id, contact_phone)
+        conversation = await queries.upsert_conversation(chatwoot_conversation_id, contact_phone)
+        logger.info("WEBHOOK: conversation upserted id=%s", conversation.id)
+
+        # Capture 'tag' private note → manual trigger (bypasses the 5-message gate)
+        if is_private and content and content.strip().lower() == "tag":
+            logger.info("WEBHOOK: 'tag' manual trigger detected for conversation %s", conversation.id)
+            if chatwoot_message_id:
+                await queries.insert_message(
+                    conversation.id, chatwoot_message_id, content,
+                    "inbound", "user", sender_id, sender_name, is_private=True, sent_at=sent_at,
+                )
+            background_tasks.add_task(
                 _process_manual_tag_trigger,
                 conversation_id=conversation.id,
                 chatwoot_conversation_id=chatwoot_conversation_id,
             )
-        logger.info("WEBHOOK: 'tag' trigger enqueued as background task, returning 200")
-        return JSONResponse(status_code=200, content={"status": "ok"})
+            logger.info("WEBHOOK: 'tag' trigger enqueued as background task, returning 200")
+            return JSONResponse(status_code=200, content={"status": "ok"})
 
-    if our_message_type == "outbound":
-        is_bot = sender_id and str(sender_id) == str(settings.chatwoot_bot_agent_id)
-        if not is_bot:
-            logger.info(
-                "WEBHOOK: human agent takeover on conversation %s (sender_id=%s)",
-                conversation.id, sender_id,
-            )
-            await queries.set_conversation_stopped(conversation.id)
-            _cancel_debounce(chatwoot_conversation_id)
-            sender_type_val = "user"
-            if chatwoot_message_id and not await queries.conversation_has_messages(conversation.id):
-                await queries.set_conversation_bot_enabled(conversation.id, False)
-        else:
-            sender_type_val = "infoGatherer"
+        if our_message_type == "outbound":
+            is_bot = sender_id and str(sender_id) == str(settings.chatwoot_bot_agent_id)
+            if not is_bot:
+                logger.info(
+                    "WEBHOOK: human agent takeover on conversation %s (sender_id=%s)",
+                    conversation.id, sender_id,
+                )
+                await queries.set_conversation_stopped(conversation.id)
+                _cancel_debounce(chatwoot_conversation_id)
+                sender_type_val = "user"
+                if chatwoot_message_id and not await queries.conversation_has_messages(conversation.id):
+                    await queries.set_conversation_bot_enabled(conversation.id, False)
+            else:
+                sender_type_val = "infoGatherer"
 
+            if chatwoot_message_id:
+                await queries.insert_message(
+                    conversation.id, chatwoot_message_id, content,
+                    our_message_type, sender_type_val, sender_id, sender_name, sent_at=sent_at,
+                )
+            return JSONResponse(status_code=200, content={"status": "ok"})
+
+        # Private, non-tag note: persist only, no processing.
         if chatwoot_message_id:
             await queries.insert_message(
                 conversation.id, chatwoot_message_id, content,
-                our_message_type, sender_type_val, sender_id, sender_name,
+                "inbound", "contact", sender_id, sender_name, is_private=True, sent_at=sent_at,
             )
         return JSONResponse(status_code=200, content={"status": "ok"})
 
-    if chatwoot_message_id:
-        await queries.insert_message(
-            conversation.id, chatwoot_message_id, content,
-            "inbound", "contact", sender_id, sender_name, is_private=is_private,
-        )
-
-    if not is_private:
-        background_tasks.add_task(
-            _enqueue_debounced_inbound,
-            conversation_id=conversation.id,
-            chatwoot_conversation_id=chatwoot_conversation_id,
-            content=content or "",
-            chatwoot_message_id=chatwoot_message_id,
-        )
+    # Inbound, non-private → enqueue immediately (before the slow conversation upsert),
+    # keyed by chatwoot_conversation_id. Upsert + persistence happen once at flush time
+    # so the debounce timer tracks the customer's send cadence, not our latency.
+    background_tasks.add_task(
+        _enqueue_debounced_inbound,
+        chatwoot_conversation_id=chatwoot_conversation_id,
+        content=content or "",
+        chatwoot_message_id=chatwoot_message_id,
+        sent_at=sent_at,
+        contact_phone=contact_phone,
+        sender_id=sender_id,
+        sender_name=sender_name,
+    )
 
     return JSONResponse(status_code=200, content={"status": "ok"})
 
 
 async def _process_inbound(
-    conversation_id,
+    *,
     chatwoot_conversation_id: int,
-    content: str,
-    chatwoot_message_id: int | None = None,
+    contact_phone: str | None,
+    fragments: list[_DebounceFragment],
 ) -> None:
+    """
+    Upsert the conversation, persist each buffered fragment, and run one coalesced
+    InfoGatherer turn. Serialized per conversation so overlapping flushes never
+    process stale state.
+    """
     from app.layers.info_gatherer import process_message
 
-    conversation = await queries.get_conversation_by_id(conversation_id)
-    if not conversation:
-        logger.error("WEBHOOK bg: conversation %s not found after upsert", conversation_id)
+    if not fragments:
         return
 
-    try:
-        await process_message(
-            conversation,
-            chatwoot_conversation_id,
-            content,
-            chatwoot_message_id=chatwoot_message_id,
-        )
-    except Exception as exc:
-        logger.error(
-            "WEBHOOK bg: unhandled error in process_message for conversation %s: %s",
-            conversation_id, exc,
-        )
+    async with _get_processing_lock(chatwoot_conversation_id):
+        conversation = await queries.upsert_conversation(chatwoot_conversation_id, contact_phone)
+
+        for fragment in fragments:
+            if fragment.chatwoot_message_id is not None:
+                await queries.insert_message(
+                    conversation.id,
+                    fragment.chatwoot_message_id,
+                    fragment.content,
+                    "inbound",
+                    "contact",
+                    fragment.sender_id,
+                    fragment.sender_name,
+                    is_private=False,
+                    sent_at=fragment.sent_at,
+                )
+
+        combined = "\n".join(f.content for f in fragments)
+        # Phrase-gate first-message detection keys on the earliest message id, so
+        # pass the burst's minimum id, not the last.
+        ids = [f.chatwoot_message_id for f in fragments if f.chatwoot_message_id is not None]
+        first_message_id = min(ids) if ids else None
+
+        try:
+            await process_message(
+                conversation,
+                chatwoot_conversation_id,
+                combined,
+                chatwoot_message_id=first_message_id,
+            )
+        except Exception as exc:
+            logger.error(
+                "WEBHOOK bg: unhandled error in process_message for conversation %s: %s",
+                conversation.id, exc,
+            )
 
 
 async def _process_conversation_updated(payload: dict) -> None:

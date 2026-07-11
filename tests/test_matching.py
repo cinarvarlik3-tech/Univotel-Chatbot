@@ -12,7 +12,10 @@ from app.layers.matching import (
     scan_entities_by_ngram,
     word_count_after_normalize,
     is_near_miss_university,
+    is_question_form,
     NEAR_MISS_BAND,
+    ALIAS_FUZZY_MAX_DIST,
+    ALIAS_FUZZY_MIN_LEN,
     NEAR_MISS_MIN_LEN,
     _get_levenshtein_cutoff,
 )
@@ -25,6 +28,14 @@ def _uni(name: str, short_name: str | None = None) -> University:
 
 def _alias(university_id: uuid.UUID, alias: str) -> UniversityAlias:
     return UniversityAlias(id=uuid.uuid4(), university_id=university_id, alias=alias)
+
+
+def _parent_alias(parent_university_id: uuid.UUID, alias: str) -> UniversityAlias:
+    return UniversityAlias(
+        id=uuid.uuid4(),
+        parent_university_id=parent_university_id,
+        alias=alias,
+    )
 
 
 def _ooc(name: str, short_name: str | None = None, city: str = "Ankara") -> OutOfCityUniversity:
@@ -135,6 +146,11 @@ def test_normalize_lowercase():
 def test_normalize_empty():
     assert normalize("") == ""
     assert normalize("   ") == ""
+
+
+def test_normalize_strips_punctuation():
+    assert normalize("İTÜ,") == "itu"
+    assert normalize("a.b,c") == "a b c"
 
 
 # ---------------------------------------------------------------------------
@@ -343,3 +359,82 @@ def test_should_return_false_when_input_would_match_via_levenshtein_tier():
 def test_near_miss_constants_are_documented():
     assert NEAR_MISS_BAND == 2
     assert NEAR_MISS_MIN_LEN == 4
+    assert ALIAS_FUZZY_MAX_DIST == 1
+    assert ALIAS_FUZZY_MIN_LEN == 4
+
+
+# ---------------------------------------------------------------------------
+# is_question_form()
+# ---------------------------------------------------------------------------
+
+def test_should_flag_question_when_message_ends_with_question_mark():
+    assert is_question_form("konum neresi?") is True
+
+
+def test_should_flag_question_when_standalone_particle_present():
+    assert is_question_form("sadece İstanbul mu") is True
+
+
+@pytest.mark.parametrize("particle", ["mı", "mi", "mu", "mü"])
+def test_should_flag_question_for_each_particle_variant(particle: str):
+    assert is_question_form(f"sadece İstanbul {particle}") is True
+
+
+def test_should_not_flag_plain_university_answer():
+    assert is_question_form("İTÜ kız") is False
+    assert is_question_form("Marmara Üniversitesi Göztepe") is False
+
+
+def test_should_not_flag_when_particle_is_substring_not_token():
+    assert is_question_form("Muğla Üniversitesi") is False
+
+
+# ---------------------------------------------------------------------------
+# match_university() — alias fuzzy (Tier 3.5)
+# ---------------------------------------------------------------------------
+
+def test_should_match_parent_when_input_is_one_edit_from_parent_alias():
+    parent_id = uuid.uuid4()
+    campus_unis = [
+        _uni("Marmara Üniversitesi - Göztepe Kampüsü", "MÜ Göztepe"),
+    ]
+    aliases = [_parent_alias(parent_id, "marmara")]
+    result = match_university("Marmaraa", campus_unis, aliases)
+    assert result.confidence == MatchConfidence.ALIAS
+    assert result.parent_university_id == parent_id
+
+
+def test_should_not_alias_fuzzy_match_when_distance_exceeds_one():
+    parent_id = uuid.uuid4()
+    campus_unis = [_uni("Marmara Üniversitesi - Göztepe Kampüsü")]
+    aliases = [_parent_alias(parent_id, "marmara")]
+    result = match_university("Marmaraaa", campus_unis, aliases)
+    assert result.confidence == MatchConfidence.NONE
+
+
+def test_should_not_alias_fuzzy_match_short_alias():
+    parent_id = uuid.uuid4()
+    aliases = [_parent_alias(parent_id, "itu")]
+    result = match_university("itr", [], aliases)
+    assert result.confidence == MatchConfidence.NONE
+
+
+def test_should_return_ambiguous_when_two_distinct_aliases_within_one_edit():
+    parent_a = uuid.uuid4()
+    parent_b = uuid.uuid4()
+    aliases = [
+        _parent_alias(parent_a, "testa"),
+        _parent_alias(parent_b, "testb"),
+    ]
+    result = match_university("testc", [], aliases)
+    assert result.confidence == MatchConfidence.AMBIGUOUS
+
+
+def test_should_prefer_name_levenshtein_match_over_alias_fuzzy():
+    parent_id = uuid.uuid4()
+    uni_id = uuid.uuid4()
+    unis = [University(id=uni_id, name="Yıldız Teknik Üniversitesi")]
+    aliases = [_parent_alias(parent_id, "yildiz")]
+    result = match_university("Yıdız Teknik", unis, aliases)
+    assert result.confidence == MatchConfidence.LEVENSHTEIN
+    assert result.university_id == uni_id

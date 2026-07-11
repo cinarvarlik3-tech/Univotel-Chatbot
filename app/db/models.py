@@ -107,6 +107,9 @@ class Message(BaseModel):
     sender_name: Optional[str] = None
     is_private: bool = False
     created_at: Optional[datetime] = None
+    # True send time from Chatwoot (customer cadence), distinct from created_at
+    # which records when our pipeline persisted the row.
+    sent_at: Optional[datetime] = None
 
 
 class CannedResponse(BaseModel):

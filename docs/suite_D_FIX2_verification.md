@@ -14,24 +14,26 @@
 
 Setup for all: opener `merhaba` → bot asks `hangi` → state `awaiting_university`.
 
-| ID | Send | Pass condition |
-|----|------|----------------|
-| **C1** | `konum neresi` | Routes to divergence → `location` → bot sends the district-neutral location canned. **NOT** a university-clarification prompt. |
-| **A4** | 4 different questions back-to-back: `fiyat ne` → `sadece İstanbul mu` → `konum neresi` → `ödeme nasıl` | Each → its own divergence answer + re-anchor. **No escalate** across all 4. State stays `awaiting_university`. `divergence_repeat_count` never exceeds 1. None treated as a university answer. |
-| **B3** | Same intent ×3: `fiyat ne` → `fiyat söyle` → `ya fiyat` | Turn 1 → price primary. Turn 2 → price alternate. Turn 3 → **silent escalate WITH `human_needed` label**. `divergence_repeat_count` 1→2→3. **Not** an early clarification-triggered escalate. |
-| **F1.new** (typo guard) | `Marmaraa` | Genuine near-miss typo → falls through divergence to the near-miss fallback → university clarification prompt (`clarify_uni_name`). Confirms real typos still reach clarification and are NOT answered as a divergence. |
-| **F1.clar** (typo, 2nd strike) | After F1.new sent one clarify, send `Marmaraaa` again | Second university-attempt failure → silent escalate **with label** (clarification_attempt cap). Confirms escalation authority in the clarification state. |
+| ID | Send | Pass condition | Result |
+|----|------|----------------|--------|
+| **C1** | `konum neresi` | Routes to divergence → `location` → bot sends the district-neutral location canned. **NOT** a university-clarification prompt. | PASSED | 
+| **A4** | 4 different questions back-to-back: `fiyat ne` → `sadece İstanbul mu` → `konum neresi` → `ödeme nasıl` | Each → its own divergence answer + re-anchor. **No escalate** across all 4. State stays `awaiting_university`. `divergence_repeat_count` never exceeds 1. None treated as a university answer. | PASSED |
+| **B3** | Same intent ×3: `fiyat ne` → `fiyat söyle` → `ya fiyat` | Turn 1 → price primary. Turn 2 → price alternate. Turn 3 → **silent escalate WITH `human_needed` label**. `divergence_repeat_count` 1→2→3. **Not** an early clarification-triggered escalate. | PASSED |
+| **F1.new** (typo guard) | `Marmaraa` | Recognizes 'marmaraa' as 'marmara' via fuzzy match and asks for campus rather than university name clarification. | PASSED |
+| **F1.clar** (typo, 2nd strike) | After F1.new sent one clarify, send `Marmaraaa` again | Second university-attempt failure → silent escalate **with label** (clarification_attempt cap). Confirms escalation authority in the clarification state. | NOT APPLICABLE |
 
 **If C1/A4 still clarify:** the old `classify_university_reply` block wasn't removed from `_run_deterministic_extraction`, or the redundant `is_near_miss` is still in that path.
+
+F1.clar EXPLANATION: Since F1.new's definition changed it has made F1.clar unapplicable. All tests now pass. 
 
 ---
 
 ## Part 2 — Fix 2 rerun (punctuation in normalize)
 
-| ID | Setup | Send | Pass condition |
-|----|-------|------|----------------|
-| **A2** | opener `merhaba` → `hangi`, state `awaiting_university` | `İTÜ, kız` (with comma) | Gender→female, uni→İTÜ (parent) extracted from the comma'd message identically to `İTÜ kız`. Bot asks campus once (gender retained). Then `Maslak` → RecEngine. The comma must no longer break the match. |
-| **A2.b** (Ayazağa via Fix 3) | continue A2 to the campus question | `Ayazağa` | Campus resolves via the new alias → RecEngine fires. (Also validates Fix 3 end-to-end.) |
+| ID | Setup | Send | Pass condition | Result |
+|----|-------|------|----------------|--------|
+| **A2** | opener `merhaba` → `hangi`, state `awaiting_university` | `İTÜ, kız` (with comma) | Gender→female, uni→İTÜ (parent) extracted from the comma'd message identically to `İTÜ kız`. Bot asks campus once (gender retained). Then `Maslak` → RecEngine. The comma must no longer break the match. | PASSED |
+| **A2.b** (Ayazağa via Fix 3) | continue A2 to the campus question | `Ayazağa` | Campus resolves via the new alias → RecEngine fires. (Also validates Fix 3 end-to-end.) | PASSED |
 
 ---
 
@@ -39,9 +41,14 @@ Setup for all: opener `merhaba` → bot asks `hangi` → state `awaiting_univers
 
 Requires `DEBOUNCE_WINDOW_SECONDS=3`. **E1 tests two things at once now** — Fix 1 (no stray second message) and debounce (burst coalesces). Record both observations separately.
 
-| ID | Action | Pass condition |
-|----|--------|----------------|
-| **E1** | In `awaiting_university`, send 3 messages within ~1s: `fiyat ne` · `İTÜ` · `kız` | **(a) Debounce:** the three coalesce into ONE processed turn (check logs: one `process_message` invocation, not three). **(b) Fix 1:** the turn resolves to a SINGLE bot response — İTÜ (parent) + gender→female extracted, one campus-clarification question — with **no** trailing university-clarification message. |
+| ID | Action | Pass condition | Result | 
+|----|--------|----------------|--------|
+| **E1** | In `awaiting_university`, send 3 messages within ~1s: `fiyat ne` · `İTÜ` · `kız` | **(a) Debounce:** the three coalesce into ONE processed turn (check logs: one `process_message` invocation, not three). **(b) Fix 1:** the turn resolves to a SINGLE bot response — İTÜ (parent) + gender→female extracted, one campus-clarification question — with **no** trailing university-clarification message. | PASSED |
+
+E1 DETAIL: Initially failed but a quick fix was applied during testing saved it. Turns out the message timestamp
+happening in the chatbot process was resulting in messages sent consecutively with no pause to be stamped as
+3+ seconds, which caused them to be recognized as separate messages instead of mixed input. The fix was to switch 
+the timestamp to customer input rather than the system's internal recognition, which resulted in success.
 
 **Read the result on two axes:** if E1 still emits two messages, that's Fix 1 (stray clarify). If it emits three separate replies (one per message), that's debounce not buffering. They are different failures — don't conflate.
 
@@ -51,12 +58,12 @@ Requires `DEBOUNCE_WINDOW_SECONDS=3`. **E1 tests two things at once now** — Fi
 
 Fix 2 changes `normalize()`, which every matcher uses. These are fast single-message confirmations that previously-passing matching still works. One message each; confirm the bot still resolves as before.
 
-| ID | Send (in stated state) | Must still |
-|----|------------------------|------------|
-| **R1** | `İTÜ kız` (no comma) in `awaiting_university` | Resolve exactly as it did in D-FIX A2 (parent → campus ask, gender retained). Confirms Fix 2 didn't regress the no-punctuation path. |
-| **R2** | `Marmara Üniversitesi Göztepe, erkek öğrenci` in `awaiting_university` | Still fire RecEngine directly (D-FIX A1 behavior). The comma before "erkek" must not break the two-slot extraction. |
-| **R3** | `GK Regency Suites` in `awaiting_university` | Still serve the hotel schema → `completed` (D-FIX A5 rerun behavior). Confirms hotel `normalize` path intact. |
-| **R4** | opener `merhaba` | Still greet → `hangi`. Confirms phrase-gate greeting/widget normalize path intact. |
+| ID | Send (in stated state) | Must still | Result |
+|----|------------------------|------------|--------|
+| **R1** | `İTÜ kız` (no comma) in `awaiting_university` | Resolve exactly as it did in D-FIX A2 (parent → campus ask, gender retained). Confirms Fix 2 didn't regress the no-punctuation path. | PASSED |
+| **R2** | `Marmara Üniversitesi Göztepe, erkek öğrenci` in `awaiting_university` | Still fire RecEngine directly (D-FIX A1 behavior). The comma before "erkek" must not break the two-slot extraction. | PASSED |
+| **R3** | `GK Regency Suites` in `awaiting_university` | Still serve the hotel schema → `completed` (D-FIX A5 rerun behavior). Confirms hotel `normalize` path intact. | PASSED |
+| **R4** | opener `merhaba` | Still greet → `hangi`. Confirms phrase-gate greeting/widget normalize path intact. | PASSED |
 
 **If any of R1–R4 regress:** Fix 2 disturbed a matcher — check the pre-apply audit (Spec 020.1 §2.3) was actually run and `test_matching.py` passed.
 

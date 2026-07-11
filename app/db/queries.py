@@ -524,18 +524,19 @@ async def insert_message(
     sender_id: Optional[str],
     sender_name: Optional[str],
     is_private: bool = False,
+    sent_at: Optional[datetime] = None,
 ) -> None:
     pool = get_pool()
     await pool.execute(
         """
         INSERT INTO messages
             (conversation_id, chatwoot_message_id, content, message_type,
-             sender_type, sender_id, sender_name, is_private)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+             sender_type, sender_id, sender_name, is_private, sent_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         ON CONFLICT (chatwoot_message_id) DO NOTHING
         """,
         conversation_id, chatwoot_message_id, content,
-        message_type, sender_type, sender_id, sender_name, is_private,
+        message_type, sender_type, sender_id, sender_name, is_private, sent_at,
     )
     # Only real messages advance the activity clock and the 5-message counter.
     if not is_private:
