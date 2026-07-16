@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.config import settings, validate_config  # noqa: F401 — validates env vars at import time
+from app.llm.factory import validate_llm_config
 from app.db.client import create_pool, close_pool
 from app.health.integrity_check import run_integrity_check, start_daily_integrity_sweep
 from app.background.reprompt_sweep import start_reprompt_sweep
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI):
         settings.testing_limitations_mode,
         settings.live_testing_limit,
     )
+    validate_llm_config()
     await run_integrity_check(fatal_on_failure=not settings.integrity_check_bypass)
     _background_tasks.append(asyncio.create_task(start_reprompt_sweep()))
     _background_tasks.append(asyncio.create_task(start_daily_integrity_sweep()))

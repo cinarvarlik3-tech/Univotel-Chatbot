@@ -15,6 +15,7 @@ import uuid
 from typing import Optional
 
 from app.config import settings
+from app.llm.factory import resolve_task_config
 from app.db import queries
 from app.db.models import Conversation, Message
 
@@ -27,7 +28,15 @@ async def submit_nightly_batch() -> None:
     Idempotency guard: each conversation gets its own run_id; if a run row already
     exists in 'processing' for the same conversation from a prior retry, it's skipped.
     """
-    if not settings.gemini_api_key:
+    tagassigner_llm = resolve_task_config("tagassigner")
+    if tagassigner_llm.provider != "gemini":
+        logger.warning(
+            "batch_client: nightly batch requires TAGASSIGNER_PROVIDER=gemini "
+            "(current=%s) — skipping",
+            tagassigner_llm.provider,
+        )
+        return
+    if not tagassigner_llm.api_key:
         logger.fatal("batch_client: GEMINI_API_KEY not configured — skipping nightly batch")
         return
 
@@ -41,6 +50,9 @@ async def submit_nightly_batch() -> None:
     # Build one request per conversation, pre-generating run_ids
     requests = []
     run_ids: dict[str, uuid.UUID] = {}  # custom_id → run_id
+    from app.tagassigner.university_list_context import load_formatted_university_list_lines
+
+    university_list_lines = await load_formatted_university_list_lines()
 
     for conv in conversations:
         run_id = uuid.uuid4()
@@ -53,7 +65,17 @@ async def submit_nightly_batch() -> None:
         current_labels = await _fetch_current_labels_safe(conv)
 
         from app.tagassigner.payload_builder import build_batch_request
-        req = build_batch_request(conv, messages, current_labels, custom_id)
+        from app.tagassigner.router import _university_display_for_conv
+
+        university_display = await _university_display_for_conv(conv)
+        req = build_batch_request(
+            conv,
+            messages,
+            current_labels,
+            custom_id,
+            university_display=university_display,
+            university_list_lines=university_list_lines,
+        )
         requests.append(req)
         run_ids[custom_id] = run_id
 
@@ -95,14 +117,15 @@ async def _submit_batch(
     Submit requests to the Gemini Batch API with a dynamic webhook bound to this job.
     Returns the Google batch job resource name, or None on failure.
     """
-    if not settings.gemini_api_key:
+    tagassigner_llm = resolve_task_config("tagassigner")
+    if tagassigner_llm.provider != "gemini" or not tagassigner_llm.api_key:
         return None
 
     try:
         import google.genai as genai
         from google.genai import types
 
-        client = genai.Client(api_key=settings.gemini_api_key)
+        client = genai.Client(api_key=tagassigner_llm.api_key)
 
         # Build the batch requests in Gemini's expected format
         batch_requests = []
@@ -124,7 +147,7 @@ async def _submit_batch(
         #
         # batch_job = await asyncio.to_thread(
         #     client.batches.create,
-        #     model=settings.model_id,
+        #     model=tagassigner_llm.model_id,
         #     src=batch_requests,
         #     config=types.CreateBatchJobConfig(
         #         webhook_config=types.WebhookConfig(
@@ -172,9 +195,9 @@ async def process_batch_results(output_file_uri: str, run_id_map: dict[str, str]
             run_id = uuid.UUID(run_id_str)
             conversation_id = uuid.UUID(custom_id)
 
-            from app.tagassigner.payload_builder import parse_gemini_tag_result
-            gemini_result = parse_gemini_tag_result(raw_response)
-            if gemini_result is None:
+            from app.tagassigner.payload_builder import parse_tag_result
+            tag_result = parse_tag_result(raw_response)
+            if tag_result is None:
                 logger.error(
                     "batch_client: malformed Gemini response for conversation %s", conversation_id
                 )
@@ -182,7 +205,7 @@ async def process_batch_results(output_file_uri: str, run_id_map: dict[str, str]
                 continue
 
             from app.tagassigner.router import apply_tagassigner_result
-            await apply_tagassigner_result(conversation_id, run_id, gemini_result)
+            await apply_tagassigner_result(conversation_id, run_id, tag_result)
 
         except Exception as exc:
             logger.error("batch_client: error processing batch result line: %s", exc)

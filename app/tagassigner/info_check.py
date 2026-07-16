@@ -68,7 +68,8 @@ def apply_info_check(
     if not blocked:
         if has_label:
             labels = [l for l in labels if l != INFO_CHECK_LABEL]
-        return InfoCheckDecision(labels=labels, clear_active=has_label)
+        should_clear = has_label or bool(conv.info_check_fingerprint)
+        return InfoCheckDecision(labels=labels, clear_active=should_clear)
 
     primary = pick_primary_mismatch(blocked)
     if primary is None:

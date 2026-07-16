@@ -6,7 +6,6 @@ routing, and customer-facing text live elsewhere.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -15,7 +14,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from app.config import settings
+from app.llm.factory import get_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -83,38 +82,17 @@ def _parse_intent(raw: str) -> Optional[Intent]:
     return Intent(label)
 
 
-def _sync_gemini_call(system_prompt: str, user_content: str) -> Optional[str]:
-    """Synchronous Gemini call via google.genai."""
-    if not settings.gemini_api_key:
-        logger.error("divergence_classifier: GEMINI_API_KEY not configured")
-        return None
-
-    import google.genai as genai
-    from google.genai import types
-
-    client = genai.Client(api_key=settings.gemini_api_key)
-    response = client.models.generate_content(
-        model=settings.model_id,
-        contents=user_content,
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            response_mime_type="application/json",
-            temperature=0.0,
-        ),
-    )
-    return response.text if response.text else None
-
-
-async def _call_gemini_once(message: str) -> Optional[Intent]:
-    """Single Gemini attempt; returns None on transport/parse failure."""
+async def _call_llm_once(message: str) -> Optional[Intent]:
+    """Single LLM attempt; returns None on transport/parse failure."""
     user_content = _build_user_content(message)
     system_prompt = (
         "You are an intent classifier. Return only the JSON object specified in the prompt."
     )
     try:
-        raw = await asyncio.to_thread(_sync_gemini_call, system_prompt, user_content)
+        client = get_llm_client("divergence")
+        raw = await client.complete(system_prompt, user_content)
     except Exception as exc:
-        logger.warning("divergence_classifier: Gemini error: %s", exc)
+        logger.warning("divergence_classifier: LLM error: %s", exc)
         return None
     if not raw:
         return None
@@ -129,7 +107,7 @@ async def classify(message: str) -> ClassificationResult:
     so the orchestrator can apply state-specific fallback behavior.
     """
     for attempt in (1, 2):
-        intent = await _call_gemini_once(message)
+        intent = await _call_llm_once(message)
         if intent is not None:
             return ClassificationResult(intent=intent, llm_failed=False)
         logger.warning("divergence_classifier: attempt %d failed for message %r", attempt, message[:80])

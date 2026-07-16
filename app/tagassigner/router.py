@@ -2,9 +2,9 @@
 TagAssigner Script Router — the single I/O broker (§1 of tagassigner-v1-spec.md).
 
 Orchestrates the full pipeline per run (spec 018):
-  DB → Router → Gemini → Router → DB → Chatwoot
+  DB → Router → LLM → Router → DB → Chatwoot
 
-Gemini never touches the DB or Chatwoot directly. The Router is the sole authority.
+The LLM never touches the DB or Chatwoot directly. The Router is the sole authority.
 """
 from __future__ import annotations
 import json
@@ -15,21 +15,31 @@ from typing import Optional, Union
 
 from app.config import settings, TESTING_PHONE_ALLOWLIST
 from app.db import queries
-from app.db.models import Conversation, TagAssignerLog
-from app.chatwoot_client import get_labels, set_labels
+from app.db.models import Conversation, Message, TagAssignerLog
+from app.chatwoot_client import get_labels, set_labels, fetch_conversation
 from app.tagassigner.label_resolver import (
     resolve_labels,
     remove_tag_trigger_label,
     strip_gemini_deal_awaiting,
+    strip_llm_fiyat_soruyor,
 )
 from app.tagassigner.deal_awaiting import apply_deal_awaiting
+from app.tagassigner.fiyat_soruyor import compute_fiyat_soruyor
 from app.tagassigner.payload_builder import build_payload
-from app.tagassigner.gemini_client import call_gemini
+from app.tagassigner.university_list_context import load_formatted_university_list_lines
+from app.llm.factory import resolve_task_config
+from app.tagassigner.llm_client import call_llm
 from app.tagassigner.attribute_resolver import push_chatwoot_attribute_patches
-from app.tagassigner.gemini_types import GeminiTagResult
-from app.tagassigner.attribute_merger import merge_attributes
-from app.tagassigner.attribute_helpers import gender_enum_to_display
+from app.tagassigner.llm_types import TagResult
+from app.tagassigner.attribute_merger import merge_attributes, reconcile_chatwoot_attributes
+from app.tagassigner.attribute_helpers import UNIVERSITY_CAMPUS_AMBIGUOUS, gender_enum_to_display
 from app.tagassigner.info_check import apply_info_check, strip_gemini_info_check
+from app.tagassigner.university_resolver import resolve_university_list_value
+from app.tagassigner.university_canonicalizer import (
+    get_university_universe,
+    resolve_university_override,
+)
+from app.tagassigner.context_backfill import backfill_conversation_messages
 from app.webhooks.chatwoot import record_self_write
 
 logger = logging.getLogger(__name__)
@@ -88,53 +98,86 @@ async def run_tagging(
     current_labels_clean = remove_tag_trigger_label(current_labels)
 
     if read_full_history:
+        inserted = await backfill_conversation_messages(
+            conversation_id, conv.chatwoot_conversation_id
+        )
+        logger.info(
+            "TagAssigner router: context backfill conversation=%s inserted=%d",
+            conversation_id, inserted,
+        )
         messages = await queries.get_messages_for_conversation(conversation_id)
+        logger.info(
+            "TagAssigner router: transcript coverage conversation=%s local_msgs=%d",
+            conversation_id, len(messages),
+        )
     else:
         last_run = await _get_last_successful_run(conversation_id)
         since = last_run.completed_at if last_run else None
         messages = await queries.get_messages_for_conversation(conversation_id, since=since)
 
     university_display = await _university_display_for_conv(conv)
-    payload = build_payload(conv, messages, current_labels_clean, university_display)
+    university_list_lines = await load_formatted_university_list_lines()
+    payload = build_payload(
+        conv,
+        messages,
+        current_labels_clean,
+        university_display,
+        university_list_lines=university_list_lines,
+    )
 
-    gemini_result = await call_gemini(
+    llm_provider = resolve_task_config("tagassigner").provider
+    tag_result = await call_llm(
         system_prompt=payload["system_prompt"],
         user_content=payload["user_content"],
     )
 
-    if gemini_result is None:
+    if tag_result is None:
         logger.error(
-            "TagAssigner router: Gemini call failed for conversation %s", conversation_id
+            "TagAssigner router: LLM call failed for conversation %s", conversation_id
         )
-        await _log(run_id, conversation_id, "api", "router", "gemini", False, "0",
-                   "Gemini call returned None")
+        await _log(run_id, conversation_id, "api", "router", llm_provider, False, "0",
+                   "LLM call returned None")
         await queries.update_tagassigner_run_failed(run_id)
         return False
 
-    await _log(run_id, conversation_id, "api", "router", "gemini", True, "200")
+    await _log(run_id, conversation_id, "api", "router", llm_provider, True, "200")
 
     await queries.update_tagassigner_run_success(
         run_id,
-        {"labels": gemini_result.labels, "attributes": gemini_result.attributes},
+        {"labels": tag_result.labels, "attributes": tag_result.attributes},
     )
 
+    # Only a full (non-windowed) history load doubles as the full_history
+    # compute_fiyat_soruyor needs later — the incremental `since`-windowed
+    # branch above is not a substitute and must not be passed through.
+    full_history_messages = messages if read_full_history else None
+
     return await apply_tagassigner_result(
-        conversation_id, run_id, gemini_result, current_labels=current_labels_clean
+        conversation_id, run_id, tag_result,
+        current_labels=current_labels_clean,
+        full_history_messages=full_history_messages,
     )
 
 
 async def apply_tagassigner_result(
     conversation_id: uuid.UUID,
     run_id: uuid.UUID,
-    result: Union[GeminiTagResult, dict],
+    result: Union[TagResult, dict],
     current_labels: Optional[list[str]] = None,
+    full_history_messages: Optional[list[Message]] = None,
 ) -> bool:
     """
     Apply label + attribute merge pipeline and write back to Chatwoot.
     Called by run_tagging() and the batch results handler.
+
+    full_history_messages: pre-loaded full (non-windowed) conversation history,
+    if the caller already has it (run_tagging's read_full_history=True path) —
+    avoids a duplicate full-table message fetch for compute_fiyat_soruyor.
+    Callers without it (batch path, incremental runs) leave it None and this
+    function loads it itself.
     """
     if isinstance(result, dict):
-        result = _gemini_result_from_dict(result)
+        result = _tag_result_from_dict(result)
         if result is None:
             await queries.update_tagassigner_run_failed(run_id)
             return False
@@ -146,24 +189,56 @@ async def apply_tagassigner_result(
     if current_labels is None:
         current_labels = await get_labels(conv.chatwoot_conversation_id) or conv.labels or []
 
-    labels_for_resolve = strip_gemini_deal_awaiting(
-        strip_gemini_info_check(result.labels)
+    labels_for_resolve = strip_llm_fiyat_soruyor(
+        strip_gemini_deal_awaiting(
+            strip_gemini_info_check(result.labels)
+        )
     )
     resolved = resolve_labels(current_labels, labels_for_resolve)
 
     university_display = await _university_display_for_conv(conv)
     proposed_uni = result.attributes.get("university", "bilinmiyor")
-    resolved_uni_id = await queries.get_university_id_for_chatwoot_list_value(
-        proposed_uni.strip()
-    ) if proposed_uni.strip() not in ("bilinmiyor", "boş", "") else None
+    label_map = await queries.get_university_chatwoot_label_map()
+
+    # Option-3 override (spec 027, Mode C): the LLM's list-value guess is the
+    # "belt"; the deterministic canonicalizer (app.tagassigner.
+    # university_canonicalizer) is the "suspenders" and wins whenever it
+    # produces a confident campus match. Pure decision logic lives in
+    # resolve_university_override — see its docstring for the full precedence.
+    universe = await get_university_universe()
+    override_uni = resolve_university_override(
+        proposed_uni, result.university_mention, label_map, universe
+    )
+    if override_uni != proposed_uni:
+        logger.info(
+            "TagAssigner router: Mode C override conversation=%s llm=%r deterministic=%r",
+            conversation_id, proposed_uni, override_uni,
+        )
+
+    merge_attrs = dict(result.attributes)
+    merge_attrs["university"] = override_uni
+
+    proposed_uni_for_resolve = merge_attrs.get("university", "bilinmiyor")
+    if proposed_uni_for_resolve.strip() not in ("bilinmiyor", UNIVERSITY_CAMPUS_AMBIGUOUS, "boş", ""):
+        resolve_result = resolve_university_list_value(proposed_uni_for_resolve, label_map)
+        resolved_uni_id = resolve_result.university_id
+        logger.debug(
+            "TagAssigner router: university resolve conversation=%s method=%s",
+            conversation_id,
+            resolve_result.method,
+        )
+    else:
+        resolved_uni_id = None
 
     merge_result = merge_attributes(
         conv,
-        result.attributes,
+        merge_attrs,
         current_university_display=university_display,
         resolved_university_id=resolved_uni_id,
         chat_has_multiple_universities=False,
     )
+
+    llm_patch_keys = set(merge_result.chatwoot_patches.keys())
 
     if merge_result.has_accepted_updates:
         await queries.apply_tagassigner_attribute_updates(
@@ -177,6 +252,37 @@ async def apply_tagassigner_result(
         if not conv:
             return False
 
+    university_display = await _university_display_for_conv(conv)
+    fetch = await fetch_conversation(conv.chatwoot_conversation_id)
+    chatwoot_attrs = (
+        (fetch.data.get("custom_attributes") or {}) if fetch.ok and fetch.data else {}
+    )
+    if not fetch.ok:
+        logger.warning(
+            "TagAssigner router: could not fetch Chatwoot attributes for conversation %s — "
+            "skipping reconciliation",
+            conversation_id,
+        )
+
+    recon_patches = reconcile_chatwoot_attributes(
+        conv,
+        chatwoot_attrs,
+        university_display=university_display,
+    )
+    recon_patch_keys = {
+        k for k in recon_patches.keys() if k not in llm_patch_keys
+    }
+    all_patches = dict(recon_patches)
+    all_patches.update(merge_result.chatwoot_patches)
+
+    logger.info(
+        "TagAssigner router: merge conversation=%s llm_patches=%s recon_patches=%s blocked=%s",
+        conversation_id,
+        list(llm_patch_keys) or "none",
+        list(recon_patch_keys) or "none",
+        [(m.field, m.reason) for m in merge_result.blocked_mismatches] or "none",
+    )
+
     now = datetime.now(tz=timezone.utc)
     info_decision = apply_info_check(resolved, conv, merge_result.blocked_mismatches, now)
 
@@ -189,7 +295,14 @@ async def apply_tagassigner_result(
             added_at=info_decision.added_at,
         )
 
-    final_labels = await apply_deal_awaiting(conv.university_id, info_decision.labels)
+    full_history = full_history_messages
+    if full_history is None:
+        full_history = await queries.get_messages_for_conversation(conversation_id)
+    labels_with_fiyat = compute_fiyat_soruyor(full_history, info_decision.labels)
+
+    final_labels = await apply_deal_awaiting(
+        conv.university_id, conv.gender, labels_with_fiyat
+    )
     if set(final_labels) != set(current_labels):
         success = await _write_labels_with_retry(
             conversation_id, run_id, conv.chatwoot_conversation_id, final_labels
@@ -203,16 +316,21 @@ async def apply_tagassigner_result(
             conversation_id,
         )
 
-    if merge_result.chatwoot_patches:
+    if all_patches:
         record_self_write(conv.chatwoot_conversation_id)
         attr_ok = await push_chatwoot_attribute_patches(
             conv.chatwoot_conversation_id,
-            merge_result.chatwoot_patches,
+            all_patches,
         )
         if not attr_ok:
             await queries.update_tagassigner_run_failed(run_id)
             return False
         await _log(run_id, conversation_id, "api", "router", "chatwoot", True, "200")
+    else:
+        logger.debug(
+            "TagAssigner router: no attribute patches for conversation %s — skipping Chatwoot write",
+            conversation_id,
+        )
 
     await queries.reset_tagassigner_run_counts(conversation_id)
     await queries.update_tagassigner_run_success(
@@ -242,7 +360,7 @@ async def apply_resolved_labels(
     return await apply_tagassigner_result(
         conversation_id,
         run_id,
-        GeminiTagResult(
+        TagResult(
             labels=proposed_labels,
             attributes={
                 "university": uni,
@@ -254,18 +372,23 @@ async def apply_resolved_labels(
     )
 
 
-def _gemini_result_from_dict(data: dict) -> Optional[GeminiTagResult]:
+def _tag_result_from_dict(data: dict) -> Optional[TagResult]:
     labels = data.get("labels")
     if not isinstance(labels, list):
         return None
+    university_mention_raw = data.get("university_mention")
+    university_mention = (
+        university_mention_raw if isinstance(university_mention_raw, str) else None
+    )
     attributes = data.get("attributes")
     if isinstance(attributes, dict):
-        return GeminiTagResult(
+        return TagResult(
             labels=[str(l) for l in labels if isinstance(l, str)],
             attributes={str(k): str(v) for k, v in attributes.items()},
+            university_mention=university_mention,
         )
     # Legacy runs: labels only — echo current state is unsafe; use sentinels (no-op merge)
-    return GeminiTagResult(
+    return TagResult(
         labels=[str(l) for l in labels if isinstance(l, str)],
         attributes={
             "university": "bilinmiyor",

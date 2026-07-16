@@ -16,8 +16,9 @@ LIST_1_USABLE: frozenset[str] = frozenset([
     "ogrenci", "veli", "ogrenci-degil",
     "kyk-sonuc-bekliyor", "ibb-yurdu-sonuc-bekliyor",
     "universite-yurdu-sonuc-bekliyor", "yatay_geçiş_bekliyor",
-    "univotelli", "fiyat-soruyor", "ilgilenmiyor", "info-check",
+    "univotelli", "ilgilenmiyor", "info-check",
     "ziyaret", "ziyaret-etti", "ziyaret-etmedi",
+    "hizmet-veremiyoruz",
 ])
 
 LIST_2_TERMINAL: frozenset[str] = frozenset([
@@ -228,3 +229,11 @@ def remove_tag_trigger_label(labels: list[str]) -> list[str]:
 def strip_gemini_deal_awaiting(proposed_labels: list[str]) -> list[str]:
     """Remove deal_awaiting if Gemini incorrectly proposed it."""
     return [l for l in proposed_labels if l != DEAL_AWAITING_LABEL]
+
+
+def strip_llm_fiyat_soruyor(proposed_labels: list[str]) -> list[str]:
+    """
+    Remove fiyat-soruyor if the LLM proposed it — the Router computes this
+    label deterministically from the transcript (app.tagassigner.fiyat_soruyor).
+    """
+    return [l for l in proposed_labels if l != "fiyat-soruyor"]

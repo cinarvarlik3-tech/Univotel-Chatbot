@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 
 
 class Settings(BaseSettings):
@@ -23,9 +23,29 @@ class Settings(BaseSettings):
     # When true, suppress all lead-facing messages via send_with_retry (labels/attributes/private notes still write).
     outbound_block: bool = False
 
-    # TagAssigner — Gemini
-    model_id: str = "gemini-2.5-flash-lite"
+    # LLM — provider keys (all stored; per-task provider selects which is used)
     gemini_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+
+    # LLM — default model per provider
+    model_id: str = "gemini-2.5-flash-lite"  # legacy alias for GEMINI_MODEL_ID
+    gemini_model_id: Optional[str] = None
+    openai_model_id: str = "gpt-5.4-nano"
+    anthropic_model_id: str = "claude-haiku-4-5"
+
+    # LLM — per-task provider selection
+    tagassigner_provider: str = "gemini"
+    divergence_provider: str = "gemini"
+
+    # LLM — optional per-task model overrides (blank = use <PROVIDER>_MODEL_ID)
+    tagassigner_model_id: Optional[str] = None
+    divergence_model_id: Optional[str] = None
+
+    # LLM — shared tuning
+    llm_temperature: float = 0.0
+    llm_reasoning_effort: Optional[str] = None
+    llm_max_output_tokens: Optional[int] = None
 
     # TagAssigner — batch webhook (Standard Webhooks symmetric secret, base64-encoded)
     gemini_webhook_secret: Optional[str] = None
@@ -39,12 +59,47 @@ class Settings(BaseSettings):
     # Inbound message debounce (Spec 020 Part E). 0 = disabled (process immediately).
     debounce_window_seconds: int = 3
 
+    # Univotel CRM Postgres (read-only import for tag importConvo testing).
+    crm_database_url: Optional[str] = None
+
     @field_validator("database_url")
     @classmethod
     def database_url_must_be_postgres(cls, v: str) -> str:
         if not v.startswith("postgresql"):
             raise ValueError("DATABASE_URL must be a PostgreSQL connection string")
         return v
+
+    @field_validator("crm_database_url")
+    @classmethod
+    def crm_database_url_must_be_postgres(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not str(v).strip():
+            return None
+        if not str(v).startswith("postgresql"):
+            raise ValueError("CRM_DATABASE_URL must be a PostgreSQL connection string")
+        return str(v).strip()
+
+    @field_validator("tagassigner_model_id", "divergence_model_id", "llm_reasoning_effort", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    @field_validator("llm_max_output_tokens", mode="before")
+    @classmethod
+    def empty_int_to_none(cls, v: object) -> object:
+        if v is None:
+            return None
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    @model_validator(mode="after")
+    def sync_gemini_model_id(self) -> "Settings":
+        """MODEL_ID (legacy) populates GEMINI_MODEL_ID when unset."""
+        if self.gemini_model_id is None:
+            object.__setattr__(self, "gemini_model_id", self.model_id)
+        return self
 
     model_config = {"env_file": ".env", "case_sensitive": False}
 

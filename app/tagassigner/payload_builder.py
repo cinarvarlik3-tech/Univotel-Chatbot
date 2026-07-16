@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 from app.db.models import Conversation, Message
 from app.config import TAGASSIGNER_ATTRIBUTE_KEYS, TAGASSIGNER_BOT_WRITABLE_ATTRIBUTES
-from app.tagassigner.gemini_types import GeminiTagResult
+from app.tagassigner.llm_types import TagResult
 from app.tagassigner.attribute_helpers import gender_enum_to_display
 
 _PROMPT_PATH = Path(__file__).parent.parent.parent / "system_prompts" / "tagassigner_prompt.md"
@@ -32,6 +32,7 @@ def build_payload(
     messages: list[Message],
     current_labels: list[str],
     university_display: Optional[str] = None,
+    university_list_lines: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """
     Build the structured payload for a Gemini live call.
@@ -41,9 +42,15 @@ def build_payload(
     - user_content: str  (the conversation transcript + context)
 
     university_display: resolved Chatwoot list string for university_id (from Router).
+    university_list_lines: formatted list + abbreviation lines for Gemini selection.
     """
     transcript = _build_transcript(messages)
-    context = _build_context(conversation, current_labels, university_display)
+    context = _build_context(
+        conversation,
+        current_labels,
+        university_display,
+        university_list_lines=university_list_lines or [],
+    )
 
     user_content = f"{context}\n\n## Konuşma\n{transcript}"
 
@@ -59,12 +66,19 @@ def build_batch_request(
     current_labels: list[str],
     custom_id: str,
     university_display: Optional[str] = None,
+    university_list_lines: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """
     Build a single Gemini Batch API request object.
     custom_id is used to correlate results back to conversations.
     """
-    payload = build_payload(conversation, messages, current_labels, university_display)
+    payload = build_payload(
+        conversation,
+        messages,
+        current_labels,
+        university_display,
+        university_list_lines=university_list_lines,
+    )
     return {
         "custom_id": custom_id,
         "system_prompt": payload["system_prompt"],
@@ -86,6 +100,7 @@ def _build_context(
     conversation: Conversation,
     current_labels: list[str],
     university_display: Optional[str] = None,
+    university_list_lines: Optional[list[str]] = None,
 ) -> str:
     """
     Assembles the context block for Gemini.
@@ -101,6 +116,10 @@ def _build_context(
     lines.append(f"ogrenci_cinsiyet: {gender_str}")
     lines.append(f"oda_tiipi: {conversation.oda_tiipi if conversation.oda_tiipi else 'boş'}")
 
+    if university_list_lines:
+        lines.append("### Geçerli üniversite listesi (yalnızca bu değerlerden birini kullan)")
+        lines.extend(university_list_lines)
+
     lines.append("### Human-only (context for labelling — never in attributes output)")
     for key in TAGASSIGNER_ATTRIBUTE_KEYS:
         value = getattr(conversation, key, None)
@@ -111,10 +130,14 @@ def _build_context(
     return "\n".join(lines)
 
 
-def parse_gemini_tag_result(raw: str) -> GeminiTagResult | None:
+def parse_tag_result(raw: str) -> TagResult | None:
     """
-    Parse Gemini's JSON response into labels + bot-writable attributes (spec 018).
+    Parse LLM JSON response into labels + bot-writable attributes (spec 018).
     Returns None if malformed. Attributes key is required.
+
+    `university_mention` (spec 027) is read if present but never required —
+    older/other-provider responses without it still parse successfully; the
+    Router falls back to attributes["university"] when it's absent.
     """
     raw = re.sub(r"```(?:json)?\s*", "", raw).strip()
 
@@ -145,10 +168,19 @@ def parse_gemini_tag_result(raw: str) -> GeminiTagResult | None:
             return None
         attr_out[key] = val
 
-    return GeminiTagResult(labels=label_list, attributes=attr_out)
+    university_mention_raw = data.get("university_mention")
+    university_mention = (
+        university_mention_raw if isinstance(university_mention_raw, str) else None
+    )
+
+    return TagResult(
+        labels=label_list,
+        attributes=attr_out,
+        university_mention=university_mention,
+    )
 
 
-def parse_gemini_response(raw: str) -> list[str] | None:
-    """Backward-compatible wrapper — labels only. Prefer parse_gemini_tag_result."""
-    result = parse_gemini_tag_result(raw)
+def parse_tag_labels(raw: str) -> list[str] | None:
+    """Labels-only parse. Prefer parse_tag_result for full snapshot."""
+    result = parse_tag_result(raw)
     return result.labels if result else None

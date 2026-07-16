@@ -6,6 +6,10 @@ from typing import Optional
 
 EMPTY_SENTINELS = frozenset({"", "boş", "bilinmiyor", "Bilinmiyor"})
 
+# LLM emits this when the institution is clear but campus cannot be resolved.
+# Router maps it to info-check for agent clarification — never written to Chatwoot.
+UNIVERSITY_CAMPUS_AMBIGUOUS = "bilinmiyor-kampus"
+
 GENDER_DISPLAY_TO_ENUM: dict[str, Optional[str]] = {
     "Erkek": "male",
     "Kız": "female",

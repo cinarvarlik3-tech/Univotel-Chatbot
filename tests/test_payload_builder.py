@@ -1,6 +1,6 @@
 """Unit tests for app/tagassigner/payload_builder.py.
 
-parse_gemini_response: pure JSON parsing, no I/O.
+parse_tag_result: pure JSON parsing, no I/O.
 build_payload / _build_transcript / _build_context: need Conversation + Message
   model objects — constructed directly, no DB calls.
 """
@@ -9,8 +9,8 @@ import pytest
 from unittest.mock import patch
 
 from app.tagassigner.payload_builder import (
-    parse_gemini_tag_result,
-    parse_gemini_response,
+    parse_tag_result,
+    parse_tag_labels,
     build_payload,
     build_batch_request,
     _build_transcript,
@@ -30,12 +30,12 @@ def _full_response(labels):
 
 
 # ---------------------------------------------------------------------------
-# parse_gemini_tag_result
+# parse_tag_result
 # ---------------------------------------------------------------------------
 
 def test_parse_clean_json():
     raw = _full_response(["ogrenci", "ziyaret"])
-    result = parse_gemini_tag_result(raw)
+    result = parse_tag_result(raw)
     assert result is not None
     assert result.labels == ["ogrenci", "ziyaret"]
     assert result.attributes["oda_tiipi"] == "boş"
@@ -43,43 +43,43 @@ def test_parse_clean_json():
 
 def test_parse_empty_labels():
     raw = _full_response([])
-    result = parse_gemini_tag_result(raw)
+    result = parse_tag_result(raw)
     assert result is not None
     assert result.labels == []
 
 
 def test_parse_strips_markdown_fence_json():
     raw = '```json\n' + _full_response(["ogrenci"]) + '\n```'
-    result = parse_gemini_tag_result(raw)
+    result = parse_tag_result(raw)
     assert result is not None
     assert result.labels == ["ogrenci"]
 
 
 def test_parse_strips_plain_markdown_fence():
     raw = '```\n' + _full_response(["veli"]) + '\n```'
-    result = parse_gemini_tag_result(raw)
+    result = parse_tag_result(raw)
     assert result is not None
     assert result.labels == ["veli"]
 
 
 def test_parse_returns_none_on_invalid_json():
-    assert parse_gemini_tag_result("not json at all") is None
+    assert parse_tag_result("not json at all") is None
 
 
 def test_parse_returns_none_on_json_array():
-    assert parse_gemini_tag_result('["ogrenci"]') is None
+    assert parse_tag_result('["ogrenci"]') is None
 
 
 def test_parse_returns_none_when_labels_key_missing():
-    assert parse_gemini_tag_result('{"tags": ["ogrenci"]}') is None
+    assert parse_tag_result('{"tags": ["ogrenci"]}') is None
 
 
 def test_parse_returns_none_when_labels_not_list():
-    assert parse_gemini_tag_result('{"labels": "ogrenci", "attributes": {}}') is None
+    assert parse_tag_result('{"labels": "ogrenci", "attributes": {}}') is None
 
 
 def test_parse_returns_none_when_attributes_missing():
-    assert parse_gemini_tag_result('{"labels": ["ogrenci"]}') is None
+    assert parse_tag_result('{"labels": ["ogrenci"]}') is None
 
 
 def test_parse_drops_non_string_label_items():
@@ -88,14 +88,14 @@ def test_parse_drops_non_string_label_items():
         "labels": ["ogrenci", 42, None, "ziyaret"],
         "attributes": _FULL_ATTRS,
     })
-    result = parse_gemini_tag_result(raw)
+    result = parse_tag_result(raw)
     assert result is not None
     assert result.labels == ["ogrenci", "ziyaret"]
 
 
 def test_parse_legacy_wrapper_labels_only():
     raw = '{"labels": ["ogrenci"]}'
-    assert parse_gemini_response(raw) is None
+    assert parse_tag_labels(raw) is None
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +223,46 @@ def test_context_shows_attribute_value():
     conv = _conv(ilgili_otel="Univotel Kadıköy")
     ctx = _build_context(conv, [])
     assert "Univotel Kadıköy" in ctx
+
+
+def test_should_include_university_list_values_in_context():
+    conv = _conv()
+    values = ["Boğaziçi Üniversitesi", "İstanbul Üniversitesi"]
+    ctx = _build_context(conv, [], university_list_lines=values)
+    assert "Boğaziçi Üniversitesi" in ctx
+    assert "İstanbul Üniversitesi" in ctx
+
+
+def test_should_render_valid_university_list_section_header():
+    conv = _conv()
+    ctx = _build_context(conv, [], university_list_lines=["Test Üniversitesi"])
+    assert "Geçerli üniversite listesi" in ctx
+
+
+def test_should_render_tek_kampus_tag_in_list_section():
+    conv = _conv()
+    lines = ["Yeni Yüzyıl Üniversitesi  [tek kampüs]"]
+    ctx = _build_context(conv, [], university_list_lines=lines)
+    assert "[tek kampüs]" in ctx
+
+
+def test_should_render_abbrev_subsection_header():
+    conv = _conv()
+    lines = [
+        "Doğuş Üniversitesi Dudullu",
+        "### Üniversite kısaltmaları (lead ifadesi → list değeri)",
+        "DOU Dudullu → Doğuş Üniversitesi Dudullu",
+    ]
+    ctx = _build_context(conv, [], university_list_lines=lines)
+    assert "Üniversite kısaltmaları" in ctx
+
+
+def test_build_payload_includes_university_list_when_provided():
+    conv = _conv()
+    values = ["Alpha Üniversitesi", "Beta Üniversitesi"]
+    result = build_payload(conv, [], [], university_list_lines=values)
+    assert "Alpha Üniversitesi" in result["user_content"]
+    assert "Beta Üniversitesi" in result["user_content"]
 
 
 # ---------------------------------------------------------------------------

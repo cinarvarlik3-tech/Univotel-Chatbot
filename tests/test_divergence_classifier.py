@@ -1,6 +1,6 @@
 """
 Unit tests for divergence intent classifier (app/layers/divergence_classifier.py).
-Mocks Gemini — no live API.
+Mocks LLM — no live API.
 """
 from __future__ import annotations
 
@@ -24,9 +24,9 @@ def test_should_return_none_for_malformed_json():
 
 
 @pytest.mark.asyncio
-async def test_should_return_intent_when_gemini_succeeds():
+async def test_should_return_intent_when_llm_succeeds():
     with patch(
-        "app.layers.divergence_classifier._call_gemini_once",
+        "app.layers.divergence_classifier._call_llm_once",
         new_callable=AsyncMock,
         return_value=Intent.LOCATION,
     ):
@@ -37,7 +37,7 @@ async def test_should_return_intent_when_gemini_succeeds():
 @pytest.mark.asyncio
 async def test_should_retry_once_then_mark_llm_failed():
     with patch(
-        "app.layers.divergence_classifier._call_gemini_once",
+        "app.layers.divergence_classifier._call_llm_once",
         new_callable=AsyncMock,
         return_value=None,
     ) as mock_call:

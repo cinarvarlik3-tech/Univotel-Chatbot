@@ -12,6 +12,7 @@ from typing import Any, Optional
 from app.config import TAGASSIGNER_ROOM_TYPE_VALUES
 from app.db.models import Conversation
 from app.tagassigner.attribute_helpers import (
+    UNIVERSITY_CAMPUS_AMBIGUOUS,
     gender_enum_to_display,
     gender_display_to_enum,
     normalize_attribute_value,
@@ -83,6 +84,17 @@ def _merge_university(
     multi_uni: bool,
     result: AttributeMergeResult,
 ) -> None:
+    if proposed_raw.strip() == UNIVERSITY_CAMPUS_AMBIGUOUS:
+        current_id_str = str(conv.university_id) if conv.university_id else ""
+        current = normalize_attribute_value(current_display)
+        result.blocked_mismatches.append(BlockedMismatch(
+            field="university",
+            current=current_id_str or (current or ""),
+            proposed=proposed_raw.strip(),
+            reason="campus_ambiguous",
+        ))
+        return
+
     proposed = normalize_attribute_value(proposed_raw)
     current = normalize_attribute_value(current_display)
 
@@ -201,3 +213,47 @@ def _merge_oda_tiipi(conv: Conversation, proposed_raw: str, result: AttributeMer
 
     result.oda_tiipi = proposed
     result.chatwoot_patches["oda_tiipi"] = proposed
+
+
+_SET_BY_FIELD = {
+    "university": "university_set_by",
+    "ogrenci_cinsiyet": "gender_set_by",
+    "oda_tiipi": "oda_tiipi_set_by",
+}
+
+
+def reconcile_chatwoot_attributes(
+    conv: Conversation,
+    chatwoot_attrs: dict[str, Any],
+    *,
+    university_display: Optional[str],
+) -> dict[str, str]:
+    """
+    Emit Chatwoot patches when DB holds a real value but Chatwoot is empty/stale.
+    Covers the DB→Chatwoot sync gap without overwriting human-set Chatwoot edits.
+    """
+    patches: dict[str, str] = {}
+
+    desired_by_key: dict[str, Optional[str]] = {
+        "university": university_display if conv.university_id else None,
+        "ogrenci_cinsiyet": gender_enum_to_display(conv.gender) if conv.gender else None,
+        "oda_tiipi": conv.oda_tiipi,
+    }
+
+    for key, desired in desired_by_key.items():
+        if normalize_attribute_value(desired) is None:
+            continue
+
+        chatwoot_current = chatwoot_attrs.get(key)
+        if not values_differ(chatwoot_current, desired):
+            continue
+
+        set_by_field = _SET_BY_FIELD[key]
+        if getattr(conv, set_by_field, None) == "human":
+            if normalize_attribute_value(chatwoot_current) is not None:
+                if values_differ(chatwoot_current, desired):
+                    continue
+
+        patches[key] = desired.strip() if isinstance(desired, str) else str(desired)
+
+    return patches

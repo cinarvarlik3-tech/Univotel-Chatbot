@@ -608,6 +608,7 @@ async def insert_message(
     sender_name: Optional[str],
     is_private: bool = False,
     sent_at: Optional[datetime] = None,
+    advance_activity: bool = True,
 ) -> None:
     pool = get_pool()
     await pool.execute(
@@ -622,7 +623,7 @@ async def insert_message(
         message_type, sender_type, sender_id, sender_name, is_private, sent_at,
     )
     # Only real messages advance the activity clock and the 5-message counter.
-    if not is_private:
+    if advance_activity and not is_private:
         await pool.execute(
             """
             UPDATE conversations
@@ -701,6 +702,29 @@ async def find_hotels_by_gender_and_university(
     return [Hotel(**dict(r)) for r in rows]
 
 
+async def has_any_serviceable_property(university_id: uuid.UUID) -> bool:
+    """
+    True iff any visible, gendered property serves this university — regardless
+    of which gender. Used by TagAssigner's deal_awaiting gate when the lead's
+    gender is not yet known (conservative: any coverage suppresses the add).
+    """
+    pool = get_pool()
+    row = await pool.fetchrow(
+        """
+        SELECT 1
+        FROM hotels h
+        JOIN hotel_accessible_universities hau ON hau.hotel_id = h.id
+        WHERE hau.university_id = $1
+          AND h.is_visible = true
+          AND h.gender_scope IS NOT NULL
+          AND h.id != $2
+        LIMIT 1
+        """,
+        university_id, GLOBAL_NULL_STATE_ID,
+    )
+    return row is not None
+
+
 # ---------------------------------------------------------------------------
 # hotel_chatwoot_label_map
 # ---------------------------------------------------------------------------
@@ -741,6 +765,52 @@ async def get_university_id_for_chatwoot_list_value(chatwoot_list_value: str) ->
         chatwoot_list_value,
     )
     return row["university_id"] if row else None
+
+
+async def get_all_university_chatwoot_list_values() -> list[str]:
+    """All canonical Chatwoot university list strings, sorted."""
+    pool = get_pool()
+    rows = await pool.fetch(
+        "SELECT chatwoot_list_value FROM university_chatwoot_label_map ORDER BY chatwoot_list_value"
+    )
+    return [row["chatwoot_list_value"] for row in rows]
+
+
+async def get_university_chatwoot_label_map() -> list[tuple[uuid.UUID, str]]:
+    """(university_id, chatwoot_list_value) pairs for TagAssigner Router resolution."""
+    pool = get_pool()
+    rows = await pool.fetch(
+        "SELECT university_id, chatwoot_list_value FROM university_chatwoot_label_map"
+    )
+    return [(row["university_id"], row["chatwoot_list_value"]) for row in rows]
+
+
+async def get_university_list_rows_for_tagassigner() -> list[dict]:
+    """
+    Raw rows for TagAssigner university list enrichment (one row per mapped campus).
+
+    Each dict: chatwoot_list_value, university_name, university_short_name,
+    parent_campus_count.
+    """
+    pool = get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT
+            m.chatwoot_list_value,
+            u.name AS university_name,
+            u.university_short_name,
+            (
+                SELECT COUNT(*)
+                FROM university_parent_map upm2
+                WHERE upm2.parent_university_id = upm.parent_university_id
+            ) AS parent_campus_count
+        FROM university_chatwoot_label_map m
+        JOIN universities u ON u.id = m.university_id
+        JOIN university_parent_map upm ON upm.university_id = m.university_id
+        ORDER BY m.chatwoot_list_value
+        """
+    )
+    return [dict(row) for row in rows]
 
 
 async def apply_tagassigner_attribute_updates(
@@ -985,6 +1055,15 @@ async def get_campuses_for_parent(parent_university_id: uuid.UUID) -> list[Unive
         ORDER BY campus_label
         """,
         parent_university_id,
+    )
+    return [UniversityParentMap(**dict(r)) for r in rows]
+
+
+async def get_all_university_parent_map() -> list[UniversityParentMap]:
+    """Full university_parent_map table — for in-memory caching (spec 027 Mode C)."""
+    pool = get_pool()
+    rows = await pool.fetch(
+        "SELECT university_id, parent_university_id, campus_label FROM university_parent_map"
     )
     return [UniversityParentMap(**dict(r)) for r in rows]
 

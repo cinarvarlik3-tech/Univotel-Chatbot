@@ -33,6 +33,25 @@ def test_should_add_info_check_when_blocked_mismatch():
     assert decision.fingerprint == build_fingerprint(blocked[0])
 
 
+def test_should_add_info_check_when_university_validation_failed():
+    blocked = [BlockedMismatch(
+        "university",
+        "",
+        "İstanbul Kültür Üniversitesi - Ataköy",
+        "validation_failed",
+    )]
+    decision = apply_info_check(["fiyat-soruyor"], _conv(), blocked, datetime.now(tz=timezone.utc))
+    assert INFO_CHECK_LABEL in decision.labels
+    assert decision.fingerprint == build_fingerprint(blocked[0])
+
+
+def test_should_add_info_check_when_campus_ambiguous_sentinel():
+    blocked = [BlockedMismatch("university", "", "bilinmiyor-kampus", "campus_ambiguous")]
+    decision = apply_info_check(["universitede"], _conv(), blocked, datetime.now(tz=timezone.utc))
+    assert INFO_CHECK_LABEL in decision.labels
+    assert decision.fingerprint == build_fingerprint(blocked[0])
+
+
 def test_should_not_readd_when_suppressed_fingerprint_matches():
     blocked = [BlockedMismatch("university", "a", "b", "human_set")]
     fp = build_fingerprint(blocked[0])
@@ -47,6 +66,13 @@ def test_should_remove_info_check_after_48h_ttl():
     decision = apply_info_check(
         ["ogrenci", INFO_CHECK_LABEL], conv, [], now
     )
+    assert INFO_CHECK_LABEL not in decision.labels
+    assert decision.clear_active is True
+
+
+def test_should_clear_fingerprint_when_no_blocked_mismatches_and_label_absent():
+    conv = _conv(info_check_fingerprint="university::x:y:validation_failed")
+    decision = apply_info_check(["ogrenci"], conv, [], datetime.now(tz=timezone.utc))
     assert INFO_CHECK_LABEL not in decision.labels
     assert decision.clear_active is True
 

@@ -214,3 +214,72 @@ async def fetch_conversation(chatwoot_conversation_id: int) -> FetchResult:
         return FetchResult(ok=False, status_code=0, error="TIMEOUT")
     except httpx.RequestError as exc:
         return FetchResult(ok=False, status_code=0, error=str(exc))
+
+
+_MAX_MESSAGE_PAGES = 25
+
+
+async def fetch_all_messages(chatwoot_conversation_id: int) -> Optional[list[dict]]:
+    """
+    Fetch the full message history for a conversation, paging backward.
+
+    Chatwoot returns newest-first pages; walk backward with `before` until empty.
+    Returns raw message dicts oldest-first, or None on hard failure.
+    """
+    url = (
+        f"{_BASE}/api/v1/accounts/{_ACCOUNT}"
+        f"/conversations/{chatwoot_conversation_id}/messages"
+    )
+    collected: list[dict] = []
+    before_id: Optional[int] = None
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            for page in range(_MAX_MESSAGE_PAGES):
+                params = {}
+                if before_id is not None:
+                    params["before"] = before_id
+
+                resp = await client.get(url, headers=_HEADERS, params=params or None)
+                if resp.status_code != 200:
+                    logger.error(
+                        "fetch_all_messages: HTTP %d for conversation %d",
+                        resp.status_code, chatwoot_conversation_id,
+                    )
+                    return None
+
+                payload = resp.json().get("payload", [])
+                if not isinstance(payload, list) or not payload:
+                    break
+
+                page_ids = [m.get("id") for m in payload if m.get("id") is not None]
+                if not page_ids:
+                    break
+
+                min_id = min(int(mid) for mid in page_ids)
+                if before_id is not None and min_id >= before_id:
+                    break
+
+                collected.extend(payload)
+                before_id = min_id
+
+            if page + 1 >= _MAX_MESSAGE_PAGES:
+                logger.warning(
+                    "fetch_all_messages: page cap hit for conversation %d",
+                    chatwoot_conversation_id,
+                )
+
+        collected.sort(key=lambda m: int(m.get("id", 0)))
+        return collected
+
+    except httpx.TimeoutException:
+        logger.error(
+            "fetch_all_messages: TIMEOUT for conversation %d", chatwoot_conversation_id
+        )
+        return None
+    except httpx.RequestError as exc:
+        logger.error(
+            "fetch_all_messages: network error for conversation %d: %s",
+            chatwoot_conversation_id, exc,
+        )
+        return None

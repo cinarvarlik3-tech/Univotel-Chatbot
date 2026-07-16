@@ -11,7 +11,23 @@ from app.tagassigner.label_resolver import (
     resolve_labels,
     remove_tag_trigger_label,
     strip_gemini_deal_awaiting,
+    strip_llm_fiyat_soruyor,
 )
+
+
+def test_fiyat_soruyor_is_not_list1_router_owned_since_spec_027():
+    """fiyat-soruyor moved to full Router ownership (app.tagassigner.fiyat_soruyor)."""
+    assert "fiyat-soruyor" not in LIST_1_USABLE
+
+
+def test_resolve_labels_passes_fiyat_soruyor_through_untouched():
+    """resolve_labels no longer manages fiyat-soruyor; compute_fiyat_soruyor does, downstream."""
+    result = resolve_labels(["fiyat-soruyor", "ogrenci"], ["ogrenci"])
+    assert "fiyat-soruyor" in result  # untouched passthrough, not List-1 removal
+
+
+def test_strip_llm_fiyat_soruyor_removes_llm_proposal():
+    assert strip_llm_fiyat_soruyor(["fiyat-soruyor", "ogrenci"]) == ["ogrenci"]
 
 
 # ---------------------------------------------------------------------------
@@ -89,10 +105,10 @@ def test_all_terminals_preserved():
 # ---------------------------------------------------------------------------
 
 def test_list1_label_removed_when_gemini_omits():
-    before = ["fiyat-soruyor", "ogrenci"]
-    proposed = ["ogrenci"]  # no fiyat-soruyor
+    before = ["univotelli", "ogrenci"]
+    proposed = ["ogrenci"]  # no univotelli
     result = resolve_labels(before, proposed)
-    assert "fiyat-soruyor" not in result
+    assert "univotelli" not in result
 
 
 def test_list1_label_added_when_gemini_proposes():
@@ -253,11 +269,11 @@ def test_empty_before_proposed_adds():
 
 
 def test_empty_proposed_clears_list1():
-    before = ["ogrenci", "fiyat-soruyor"]
+    before = ["ogrenci", "univotelli"]
     result = resolve_labels(before, [])
     # List-1 labels removed because Gemini proposed nothing
     assert "ogrenci" not in result
-    assert "fiyat-soruyor" not in result
+    assert "univotelli" not in result
 
 
 def test_empty_proposed_preserves_terminal():
@@ -334,3 +350,21 @@ def test_deal_awaiting_not_added_by_gemini_proposal():
     result = resolve_labels(before, proposed)
     assert "deal_awaiting" not in result
     assert "ogrenci" in result
+
+
+def test_should_allow_hizmet_veremiyoruz_as_assignable_list1_label():
+    assert "hizmet-veremiyoruz" in LIST_1_USABLE
+
+
+def test_should_add_hizmet_veremiyoruz_when_gemini_proposes():
+    before = ["ogrenci"]
+    proposed = ["ogrenci", "hizmet-veremiyoruz"]
+    result = resolve_labels(before, proposed)
+    assert "hizmet-veremiyoruz" in result
+
+
+def test_should_remove_hizmet_veremiyoruz_when_gemini_omits_it():
+    before = ["ogrenci", "hizmet-veremiyoruz"]
+    proposed = ["ogrenci"]
+    result = resolve_labels(before, proposed)
+    assert "hizmet-veremiyoruz" not in result
