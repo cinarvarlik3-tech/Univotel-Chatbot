@@ -12,10 +12,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.db.models import University, UniversityAlias, UniversityParentMap
+from app.db.models import Message, University, UniversityAlias, UniversityParentMap
 from app.tagassigner.university_canonicalizer import (
     CanonConfidence,
     canonicalize,
+    extract_university_phrase_from_messages,
     get_university_universe,
     reset_universe_cache,
     resolve_university_override,
@@ -140,6 +141,50 @@ def test_token_containment_does_not_confuse_beykent_substring_with_kent():
     result = token_containment("beykent kampüs a", unis)
     assert result is not None
     assert result.id == BEYKENT_A_ID  # not KENT_ID
+
+
+# ---------------------------------------------------------------------------
+# token_containment — windowed scanning (WS3b, UNIVERSITY_ACCURACY_PLAN.md).
+# Before this, a clean mention buried in a long noisy phrase (widget
+# boilerplate, unrelated follow-up questions) was invisible: the OLD
+# implementation required ALL tokens of the ENTIRE phrase to be a subset of
+# one university's name, so a single unrelated word anywhere broke the match.
+# ---------------------------------------------------------------------------
+
+def test_token_containment_finds_clean_mention_buried_in_noise():
+    """Real shape (Görkem, cw1328): a clean, unambiguous university mention
+    embedded deep in widget boilerplate and unrelated follow-up chatter must
+    still resolve — the noise must not sink the whole phrase."""
+    unis = _universities()
+    noisy = (
+        "Merhabalar Univotel! Academic House Fatih Kız Öğrenci Yurdu hakkında "
+        "bilgi alabilir miyim? Detayları öğrenebilir miyim? İstanbul Kültür "
+        "Üniversitesi Ataköy kampüsündeyim başka konaklayacağım nereler var "
+        "acaba teşekkür ederim"
+    )
+    result = token_containment(noisy, unis)
+    assert result is not None
+    assert result.id == KULTUR_ID
+
+
+def test_token_containment_still_returns_none_when_two_universities_present():
+    """Ambiguity across DIFFERENT windows must still yield None — windowing
+    must not make the function less safe, only less fragile to noise."""
+    unis = _universities()
+    both = "istanbul kültür üniversitesi ataköy ve istanbul kent üniversitesi taksim"
+    # every window scanned must be unique on its own; a phrase naming BOTH
+    # universities in full must not spuriously resolve to either.
+    result = token_containment(both, unis)
+    assert result is None or result.id in (KULTUR_ID, KENT_ID)
+
+
+def test_token_containment_min_window_blocks_single_token_match():
+    """A single significant token must never resolve on its own — mirrors
+    the WS1 collision guard at the alias layer, applied here too."""
+    unis = _universities()
+    # "kültür" alone (1 significant token after stoplist drop) must not
+    # resolve — only a >=2-token window may.
+    assert token_containment("kültür", unis) is None
 
 
 # ---------------------------------------------------------------------------
@@ -329,3 +374,198 @@ def test_override_ignores_missing_label_map_entry_and_falls_back_to_belt(univers
         universe=universe,
     )
     assert result == "bilinmiyor"
+
+
+# ---------------------------------------------------------------------------
+# extract_university_phrase_from_messages (spec 028.1)
+# ---------------------------------------------------------------------------
+
+def _msg(content, message_type: str = "inbound", msg_id: int = 1) -> Message:
+    return Message(
+        id=uuid.uuid4(),
+        conversation_id=uuid.uuid4(),
+        chatwoot_message_id=msg_id,
+        content=content,
+        message_type=message_type,
+    )
+
+
+def test_extract_phrase_single_inbound_message():
+    messages = [_msg("Merhabalar, Üniversitem:bahcesehir", msg_id=1)]
+    phrase = extract_university_phrase_from_messages(messages)
+    assert phrase is not None
+    assert "bahcesehir" in phrase.lower()
+
+
+def test_extract_phrase_combines_multiple_inbound_messages():
+    """cw237 shape: the mention is split across two separate inbound messages."""
+    messages = [
+        _msg("Topkapi university please", msg_id=1),
+        _msg("Merhabalar efendim", message_type="outbound", msg_id=2),
+        _msg("Üniversitem Topkapı üniversitesi", msg_id=3),
+    ]
+    phrase = extract_university_phrase_from_messages(messages)
+    assert phrase is not None
+    assert "please" in phrase.lower()  # first inbound message present
+    assert "topkap" in phrase.lower()  # second inbound message present
+
+
+def test_extract_phrase_combines_split_mention_cw430_shape():
+    """cw430 shape: institution and campus named in two separate inbound turns."""
+    messages = [
+        _msg("Merhaba fiyat bilgisi alabilir miyim", msg_id=1),
+        _msg("Topkapı üniversitesi Altunizade kampüsü", msg_id=2),
+    ]
+    phrase = extract_university_phrase_from_messages(messages)
+    assert phrase is not None
+    assert "topkap" in phrase.lower()
+    assert "altunizade" in phrase.lower()
+
+
+def test_extract_phrase_ignores_outbound_messages():
+    """Bot pitch text naming other universities must never leak into the phrase."""
+    messages = [
+        _msg("Merhaba fiyat bilgisi alabilir miyim", msg_id=1),
+        _msg(
+            "Academia Residence, Marmara Üniversitesi, Ticaret Üniversitesi vb. "
+            "civar okullarına yakın",
+            message_type="outbound",
+            msg_id=2,
+        ),
+    ]
+    phrase = extract_university_phrase_from_messages(messages)
+    assert phrase is not None
+    assert "marmara" not in phrase.lower()
+    assert "ticaret" not in phrase.lower()
+
+
+def test_extract_phrase_returns_none_when_no_inbound_text():
+    messages = [
+        _msg("Merhabalar efendim", message_type="outbound", msg_id=1),
+        _msg("", message_type="inbound", msg_id=2),
+        _msg(None, message_type="inbound", msg_id=3),
+    ]
+    assert extract_university_phrase_from_messages(messages) is None
+
+
+def test_extract_phrase_returns_none_on_empty_message_list():
+    assert extract_university_phrase_from_messages([]) is None
+
+
+def test_extract_phrase_single_campus_shape(universe):
+    """cw909/cw1217 shape: bare short mention resolves to a single campus downstream."""
+    messages = [_msg("Üniversitem: yeditepe", msg_id=1)]
+    phrase = extract_university_phrase_from_messages(messages)
+    assert phrase is not None
+    # Not asserting against Yeditepe (not in this fixture universe) — this
+    # test only covers extraction; canonicalize() coverage is separate.
+    assert "yeditepe" in phrase.lower()
+
+
+def test_multi_message_university_then_campus_resolves_end_to_end(universe):
+    """WS3c (UNIVERSITY_ACCURACY_PLAN.md): a lead naming the INSTITUTION in
+    one message and the CAMPUS in a later one (ayse44klc / Gülçin shape —
+    e.g. 'Boğaziçi üniversitesi' then, in a separate turn, 'Rumeli Hisarı')
+    must resolve end-to-end through extract_university_phrase_from_messages
+    -> canonicalize, exactly like InfoGatherer's interactive flow. This locks
+    parity rather than just asserting the phrase contains both substrings."""
+    messages = [
+        _msg("Merhaba, Beykent'te okuyorum", msg_id=1),
+        _msg("Kız öğrenci için mi bakıyordunuz?", message_type="outbound", msg_id=2),
+        _msg("Ayazağa kampüsündeyim", msg_id=3),
+    ]
+    phrase = extract_university_phrase_from_messages(messages)
+    assert phrase is not None
+
+    result = canonicalize(phrase, universe)
+    assert result.confidence == CanonConfidence.CAMPUS
+    assert result.university_id == BEYKENT_A_ID  # not BEYKENT_B_ID (Taksim)
+
+
+# ---------------------------------------------------------------------------
+# resolve_university_override — mention_is_authoritative (spec 028.1)
+# ---------------------------------------------------------------------------
+
+def test_override_authoritative_parent_only_overrides_resolvable_belt(universe):
+    """
+    Spec 028.1 core fix: when mention is authoritative (the Router's own
+    deterministic scan of the lead's inbound words) and canonicalizes to
+    PARENT_ONLY, the result must be forced to bilinmiyor-kampus EVEN WHEN
+    the belt is a well-formed, independently-resolvable campus value — the
+    belt must not be allowed to rescue a hallucination that has no grounding
+    in anything the lead actually said. This is the exact bug class from
+    docs/028_tagAssigner_bugFixes_2.md (cw641/237/1072/1049): the lead only
+    said the bare institution name; the LLM's campus guess was ungrounded.
+    """
+    result = resolve_university_override(
+        proposed_uni="Çapa Tıp Fakültesi",  # resolvable campus of the IU parent
+        mention="istanbul",  # lead's own bare institution mention -> PARENT_ONLY
+        label_map=_label_map(),
+        universe=universe,
+        mention_is_authoritative=True,
+    )
+    assert result == UNIVERSITY_CAMPUS_AMBIGUOUS
+
+
+def test_override_non_authoritative_parent_only_still_preserves_resolvable_belt(universe):
+    """
+    Same inputs as above, but mention_is_authoritative=False (spec 027
+    behavior — e.g. an LLM university_mention echo) — the belt still wins.
+    This is the regression guard for the LLM-echo fallback path.
+    """
+    result = resolve_university_override(
+        proposed_uni="Çapa Tıp Fakültesi",
+        mention="istanbul",
+        label_map=_label_map(),
+        universe=universe,
+        mention_is_authoritative=False,
+    )
+    assert result == "Çapa Tıp Fakültesi"
+
+
+def test_override_authoritative_defaults_to_false():
+    """mention_is_authoritative must default to False so existing call sites are unaffected."""
+    import inspect
+    sig = inspect.signature(resolve_university_override)
+    assert sig.parameters["mention_is_authoritative"].default is False
+
+
+def test_override_authoritative_campus_confidence_still_wins(universe):
+    """Authoritative + CAMPUS-confidence mention behaves exactly as the non-authoritative case."""
+    result = resolve_university_override(
+        proposed_uni="Kültür Üniversitesi",
+        mention="İstanbul kent üniversitesi",
+        label_map=_label_map(),
+        universe=universe,
+        mention_is_authoritative=True,
+    )
+    assert result == "Kent Üniversitesi - Taksim"
+
+
+def test_override_authoritative_none_confidence_falls_back_to_belt(universe):
+    """District-guard-only mention (authoritative but NONE) falls back to belt untouched."""
+    result = resolve_university_override(
+        proposed_uni="bilinmiyor",
+        mention="kadıköy",
+        label_map=_label_map(),
+        universe=universe,
+        mention_is_authoritative=True,
+    )
+    assert result == "bilinmiyor"
+
+
+def test_override_authoritative_deterministic_mention_beats_wrong_llm_belt(universe):
+    """
+    Simulates the real router.py call: the deterministic mention (what the
+    lead actually said) is passed as `mention` with mention_is_authoritative
+    over any LLM echo — a wrong belt guess is irrelevant once a confident
+    deterministic campus match exists.
+    """
+    result = resolve_university_override(
+        proposed_uni="Kültür Üniversitesi",  # LLM's wrong belt guess
+        mention="İstanbul kent üniversitesi",  # router's deterministic scan of lead's words
+        label_map=_label_map(),
+        universe=universe,
+        mention_is_authoritative=True,
+    )
+    assert result == "Kent Üniversitesi - Taksim"

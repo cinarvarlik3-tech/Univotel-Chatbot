@@ -36,6 +36,7 @@ from app.tagassigner.attribute_helpers import UNIVERSITY_CAMPUS_AMBIGUOUS, gende
 from app.tagassigner.info_check import apply_info_check, strip_gemini_info_check
 from app.tagassigner.university_resolver import resolve_university_list_value
 from app.tagassigner.university_canonicalizer import (
+    extract_university_phrase_from_messages,
     get_university_universe,
     resolve_university_override,
 )
@@ -200,14 +201,29 @@ async def apply_tagassigner_result(
     proposed_uni = result.attributes.get("university", "bilinmiyor")
     label_map = await queries.get_university_chatwoot_label_map()
 
-    # Option-3 override (spec 027, Mode C): the LLM's list-value guess is the
-    # "belt"; the deterministic canonicalizer (app.tagassigner.
-    # university_canonicalizer) is the "suspenders" and wins whenever it
-    # produces a confident campus match. Pure decision logic lives in
+    # Full (non-windowed) history, needed here for the deterministic Mode C
+    # scan and again below for compute_fiyat_soruyor (Mode B) — loaded once
+    # and reused for both, per spec 028.1 §2.3 (no duplicate DB round-trip).
+    full_history = full_history_messages
+    if full_history is None:
+        full_history = await queries.get_messages_for_conversation(conversation_id)
+
+    # Option-3 override (spec 027, Mode C; corrected by spec 028.1): the LLM's
+    # list-value guess is the "belt"; the deterministic canonicalizer (app.
+    # tagassigner.university_canonicalizer) is the "suspenders". The primary
+    # mention input is now the Router's own scan of the lead's inbound
+    # messages (authoritative), not the LLM's optional university_mention
+    # echo — that echo is only used as a fallback when the deterministic
+    # scan finds nothing. Pure decision logic lives in
     # resolve_university_override — see its docstring for the full precedence.
     universe = await get_university_universe()
+    deterministic_mention = extract_university_phrase_from_messages(full_history)
     override_uni = resolve_university_override(
-        proposed_uni, result.university_mention, label_map, universe
+        proposed_uni,
+        deterministic_mention or result.university_mention,
+        label_map,
+        universe,
+        mention_is_authoritative=bool(deterministic_mention),
     )
     if override_uni != proposed_uni:
         logger.info(
@@ -295,9 +311,6 @@ async def apply_tagassigner_result(
             added_at=info_decision.added_at,
         )
 
-    full_history = full_history_messages
-    if full_history is None:
-        full_history = await queries.get_messages_for_conversation(conversation_id)
     labels_with_fiyat = compute_fiyat_soruyor(full_history, info_decision.labels)
 
     final_labels = await apply_deal_awaiting(

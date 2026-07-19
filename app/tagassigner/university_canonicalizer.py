@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
-from app.db.models import University, UniversityAlias, UniversityParentMap
+from app.db.models import Message, University, UniversityAlias, UniversityParentMap
 from app.layers.matching import MatchConfidence, match_campus, normalize, scan_entities_by_ngram
 from app.tagassigner.attribute_helpers import UNIVERSITY_CAMPUS_AMBIGUOUS
 from app.tagassigner.university_resolver import resolve_university_list_value
@@ -89,31 +89,53 @@ def _build_universe(
     )
 
 
+_TOKEN_CONTAINMENT_MIN_WINDOW = 2  # never match on a single bare token (WS3b collision guard)
+
+
 def token_containment(
     phrase: str,
     universities: list[University],
 ) -> Optional[University]:
     """
     Return the unique university whose name (+ short name) token set contains
-    ALL significant tokens of the lead's phrase, after dropping faculty,
-    structural, and district tokens. Returns None on zero or multiple hits —
-    this function only ever returns a confident, unambiguous match.
+    ALL significant tokens of some contiguous WINDOW of the lead's phrase
+    (after dropping faculty, structural, and district tokens) — not
+    necessarily the whole phrase. Scans windows longest-first (most specific,
+    safest, wins), then left-to-right, and returns the first UNIQUE hit.
+    Returns None if no window ever produces a unique hit.
+
+    Windowed (WS3b, UNIVERSITY_ACCURACY_PLAN.md): a clean, unambiguous
+    mention (e.g. "Mimar Sinan Fındıklı") embedded in a long, noisy message
+    (widget boilerplate, unrelated follow-up questions) used to be invisible
+    here, because the OLD implementation required ALL tokens of the ENTIRE
+    phrase to be a subset of one university's name — any unrelated word
+    anywhere in the message broke the match. Scanning windows finds the
+    clean mention regardless of surrounding noise.
+
+    _TOKEN_CONTAINMENT_MIN_WINDOW=2 guards against the single-token collision
+    class WS1 fixed at the alias layer (a bare common/short word coincidentally
+    matching some university) — this function never resolves on 1 token alone.
     """
     drop = FACULTY_STOPLIST | STRUCTURAL_STOPLIST | DISTRICT_STOPLIST
     tokens = [t for t in normalize(phrase).split() if t not in drop]
-    if not tokens:
+    n_tokens = len(tokens)
+    if n_tokens < _TOKEN_CONTAINMENT_MIN_WINDOW:
         return None
 
-    hits: list[University] = []
+    name_token_sets: list[tuple[University, set[str]]] = []
     for uni in universities:
         name_tokens = set(normalize(uni.name).split())
         if uni.university_short_name:
             name_tokens |= set(normalize(uni.university_short_name).split())
-        if all(t in name_tokens for t in tokens):
-            hits.append(uni)
+        name_token_sets.append((uni, name_tokens))
 
-    if len(hits) == 1:
-        return hits[0]
+    for window_len in range(n_tokens, _TOKEN_CONTAINMENT_MIN_WINDOW - 1, -1):
+        for start in range(0, n_tokens - window_len + 1):
+            window = tokens[start : start + window_len]
+            hits = [uni for uni, name_tokens in name_token_sets if all(t in name_tokens for t in window)]
+            if len(hits) == 1:
+                return hits[0]
+
     return None
 
 
@@ -162,31 +184,89 @@ def canonicalize(phrase: str, universe: UniversityUniverse) -> CanonResult:
     return CanonResult(CanonConfidence.NONE)
 
 
+def extract_university_phrase_from_messages(messages: list[Message]) -> Optional[str]:
+    """
+    Deterministically extract the lead's own university/campus phrase from
+    the conversation (spec 028.1, Mode C mention fix).
+
+    Scans **inbound** messages only — mirrors the pattern in
+    app.tagassigner.fiyat_soruyor. Outbound (bot) messages are never
+    scanned: Router-authored pitch text routinely names specific
+    universities near a hotel (e.g. "Marmara Üniversitesi, Ticaret
+    Üniversitesi vb. civar okullarına"), and feeding that into canonicalize()
+    would produce false-positive campus matches. This is a hard requirement,
+    not an optimization.
+
+    Concatenates all inbound message content in chronological order (the
+    order `messages` is already in) so a lead who splits their university
+    mention across multiple messages — e.g. "Topkapı üniversitesi" in one
+    message, "Altunizade kampüsü" in a later one — is still seen as a single
+    phrase by canonicalize()'s n-gram/token-containment matchers.
+
+    Returns None when there is no inbound text to scan; the caller falls
+    back to the LLM's own university_mention / attributes.university guess.
+    """
+    parts = [
+        (msg.content or "").strip()
+        for msg in messages
+        if msg.message_type == "inbound" and (msg.content or "").strip()
+    ]
+    if not parts:
+        return None
+    return " ".join(parts)
+
+
 def resolve_university_override(
     proposed_uni: str,
     mention: Optional[str],
     label_map: list[tuple[uuid.UUID, str]],
     universe: UniversityUniverse,
+    mention_is_authoritative: bool = False,
 ) -> str:
     """
-    Pure option-3 decision (spec 027, Mode C): the university string the
-    Router should feed into merge_attributes. No I/O — fully unit-testable.
+    Pure option-3 decision (spec 027, Mode C; corrected by spec 028.1): the
+    university string the Router should feed into merge_attributes. No I/O
+    — fully unit-testable.
 
     proposed_uni: the LLM's own attributes.university guess (the "belt").
-    mention: the LLM's optional university_mention field, or None/absent.
+    mention: the university phrase to canonicalize against. As of spec
+        028.1 this is normally the Router's own deterministic scan of the
+        lead's inbound messages (see extract_university_phrase_from_messages),
+        falling back to the LLM's optional university_mention echo only when
+        the deterministic scan finds nothing.
+    mention_is_authoritative: True when `mention` is that deterministic scan
+        result (not an LLM echo, and not a fallback onto proposed_uni
+        itself). Only the caller knows this — resolve_university_override
+        cannot infer it from the string alone.
 
     Precedence:
     - A confident CAMPUS canonicalization always wins (translated to its
-      Chatwoot list value via label_map).
-    - A PARENT_ONLY canonicalization forces bilinmiyor-kampus ONLY when the
-      belt itself has nothing specific either — a stale or ambiguous mention
-      must never downgrade an already-confident, independently-resolvable
-      belt guess.
+      Chatwoot list value via label_map). Unaffected by authoritativeness.
+    - A PARENT_ONLY canonicalization:
+        - When `mention_is_authoritative` is True: forces bilinmiyor-kampus
+          UNCONDITIONALLY. The lead named a multi-campus institution without
+          a resolvable campus — per product policy (2026-07-15) this must
+          withhold even when the belt happens to be a well-formed,
+          independently-resolvable campus value, because that belt value is
+          not grounded in anything the lead actually said (it is exactly
+          the class of hallucination this fix exists to catch — see
+          docs/028_tagAssigner_bugFixes_2.md §1 and
+          docs/028.1_tagAssigner_bugFixes_2_corrected.md §0).
+        - Otherwise (LLM-echo fallback, spec 027 behavior unchanged): forces
+          bilinmiyor-kampus ONLY when the belt itself has nothing specific
+          either — a stale or ambiguous echo must never downgrade an
+          already-confident, independently-resolvable belt guess.
     - Otherwise (NONE, or mention is a sentinel/absent), the belt is used
       as-is; when mention is a sentinel this falls back to canonicalizing
       off proposed_uni itself (the safety net for providers/prompts that
       don't populate `university_mention`).
     """
+    used_authoritative = (
+        mention_is_authoritative
+        and mention is not None
+        and mention.strip() not in _UNI_SENTINELS
+    )
+
     canon_mention = mention if mention and mention.strip() not in _UNI_SENTINELS else proposed_uni
     if canon_mention.strip() in _UNI_SENTINELS:
         return proposed_uni
@@ -200,6 +280,8 @@ def resolve_university_override(
         return canon_list_value if canon_list_value is not None else proposed_uni
 
     if canon_result.confidence == CanonConfidence.PARENT_ONLY:
+        if used_authoritative:
+            return UNIVERSITY_CAMPUS_AMBIGUOUS
         belt_resolves = (
             proposed_uni.strip() not in _UNI_SENTINELS
             and resolve_university_list_value(proposed_uni, label_map).university_id is not None

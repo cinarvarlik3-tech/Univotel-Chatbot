@@ -40,6 +40,25 @@ C6  Raw duplicate aliases:
       these; this is a belt-and-suspenders check in case the constraint was
       dropped during a migration.
 
+C7  Common-word / corpus collisions (WARN, not fail) — added for
+    UNIVERSITY_ACCURACY_PLAN.md WS1:
+      a bare single-token alias whose normalized form is an ordinary Turkish
+      word (TURKISH_COMMON_WORD_STOPLIST). These can hijack the n-gram scan
+      on unrelated messages (e.g. "bilgi" = "information", present in nearly
+      every greeting, used to hijack matches meant for other universities —
+      see migrations/026_alias_hygiene.sql). WARN, not HARD: some overlaps
+      are intentional (e.g. "istanbul" -> İstanbul Üniversitesi). Human
+      judgment decides the remedy; this only surfaces candidates.
+
+C8  university_short_name common-word collisions (INFO only):
+      same hijack risk as C7 but via Tier 1 exact match against
+      universities.university_short_name, independent of the alias table
+      (e.g. "SU" -> Sabancı, "YÜ" -> Yeditepe — genuine real-world
+      abbreviations, not alias-table junk; deleting an alias row would be a
+      no-op here). INFO only — flagged for a human decision, never
+      auto-remediated, since Tier 1 is the lookup path for every
+      short_name in the system.
+
 USAGE
 -----
     export DATABASE_URL='postgresql://...'          # the ChatBot DB
@@ -116,6 +135,38 @@ if normalize is None:
     normalize = _vendored_normalize
     print("[warn] real normalize() import failed — using VENDORED copy. "
           "Verify it matches production before trusting results.")
+
+
+# ---------------------------------------------------------------------------
+# C7/C8 stoplist — ordinary Turkish words / particles that must never be a
+# BARE single-token university signal (they hijack unrelated messages).
+# Seeded from the greeting/boilerplate vocabulary + general high-frequency
+# words. Extend this list rather than hardcoding new one-off exceptions.
+# ---------------------------------------------------------------------------
+TURKISH_COMMON_WORD_STOPLIST: frozenset[str] = frozenset({
+    "bilgi", "bir", "su", "ve", "veya", "icin", "var", "yok", "okul",
+    "yurt", "oda", "kiz", "erkek", "merkez", "guney", "kuzey", "dogu",
+    "bati", "teknik", "yeni", "eski", "iyi", "kotu", "evet", "hayir",
+    "tamam", "lutfen", "tesekkur", "merhaba", "selam", "nasil", "ne",
+    "kim", "ben", "sen", "biz", "siz", "bu", "o", "da", "de",
+    "ki", "mi", "mu", "ama", "fakat", "ile", "gibi", "cok", "az",
+})
+
+
+def find_stoplist_alias_collisions(aliases, normalize_fn) -> list:
+    """Pure C7 detection logic, extracted for unit testing without a DB.
+
+    Returns the subset of `aliases` (dict-likes with an 'alias' key) whose
+    normalized form is a single token AND is in TURKISH_COMMON_WORD_STOPLIST.
+    """
+    hits = []
+    for a in aliases:
+        n = normalize_fn(a["alias"])
+        if not n or " " in n:
+            continue  # only single-token aliases can hijack a bare word
+        if n in TURKISH_COMMON_WORD_STOPLIST:
+            hits.append(a)
+    return hits
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +282,54 @@ def run_checks(aliases, unis, verbose=False):
             print(f"  ✗ '{a['alias']}' normalizes to empty string")
     if c5 == 0:
         print("  ✓ none")
+
+    # ---- C7: common-word / corpus collisions (WARN — human review) -------
+    # UNIVERSITY_ACCURACY_PLAN.md WS1. A bare single-token alias that is
+    # itself an ordinary Turkish word (or a fragment of one) can hijack the
+    # n-gram scan on unrelated messages — e.g. "bilgi" ("information") sits
+    # in almost every greeting and used to hijack matches meant for other
+    # universities before it was re-scoped to "bilgi üniversitesi" (see
+    # migrations/026_alias_hygiene.sql). This is WARN, not HARD: some short
+    # aliases are deliberately kept even though they overlap common words
+    # (e.g. "istanbul" -> İstanbul Üniversitesi is an intentional broad
+    # parent alias — see canonicalize()'s docstring in
+    # app/tagassigner/university_canonicalizer.py). Human judgment decides
+    # the remedy (delete / lengthen / keep); this check only surfaces
+    # candidates so a collision isn't discovered the hard way again.
+    print("\n[C7] Single-token aliases overlapping common Turkish words (WARN — review)")
+    c7_hits = find_stoplist_alias_collisions(aliases, normalize)
+    for a in c7_hits:
+        warnings += 1
+        print(f"  ~ '{a['alias']}' (normalized {normalize(a['alias'])!r}) -> {target_of(a)} "
+              f"is a common Turkish word — verify it can't hijack unrelated messages")
+    if not c7_hits:
+        print("  ✓ none")
+
+    # ---- C8: university_short_name common-word collisions (INFO) ---------
+    # Same hijack risk as C7, but via Tier 1 (exact match against
+    # universities.university_short_name) rather than the alias table.
+    # Discovered while implementing WS1: "su" (Sabancı, short_name "SU") and
+    # "yu"/"yü" (Yeditepe, short_name "YÜ") are NOT alias-table rows at all —
+    # deleting an alias would be a no-op. These are genuine real-world
+    # abbreviations, not junk data, and Tier 1 is the lookup path for every
+    # short_name in the system (KHAS, BOUN, GSU, ...), so silently
+    # special-casing it here is out of scope. INFO only — flagged for a
+    # human decision, never auto-remediated.
+    print("\n[C8] university_short_name values overlapping common Turkish words (INFO)")
+    c8 = 0
+    for u in unis:
+        sn = u["university_short_name"]
+        if not sn:
+            continue
+        n = normalize(sn)
+        if " " in n or not n:
+            continue
+        if n in TURKISH_COMMON_WORD_STOPLIST:
+            c8 += 1
+            print(f"  i university_short_name={sn!r} (normalized {n!r}) on uni={u['id']} "
+                  f"({u['name']}) collides with a common word via Tier 1 exact match")
+    if c8 == 0:
+        print("  i none")
 
     # ---- C6: raw duplicates (HARD) ---------------------------------------
     print("\n[C6] Exact-duplicate raw aliases (UNIQUE should prevent) (MUST be empty)")

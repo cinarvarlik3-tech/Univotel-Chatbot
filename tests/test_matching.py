@@ -86,6 +86,100 @@ def test_scan_entities_longest_first():
     assert result.university_id == itu.id
 
 
+# ---------------------------------------------------------------------------
+# scan_entities_by_ngram — confidence-ranked scan (WS3a,
+# UNIVERSITY_ACCURACY_PLAN.md). Before this, the function returned the
+# FIRST non-NONE match in scan order (longest n-gram first, then
+# left-to-right) with no notion of confidence — a short, spurious
+# parent-alias appearing early in a message could beat a later, more
+# specific campus match purely on position.
+# ---------------------------------------------------------------------------
+
+def test_campus_exact_beats_earlier_parent_alias():
+    """A real regression: 'bilgi' (a parent-alias collision with the common
+    word 'bilgi') appearing BEFORE the lead's actual university mention must
+    not win over a later, specific campus match."""
+    bilgi_parent_id = uuid.uuid4()
+    biruni = _uni("Biruni Üniversitesi", short_name="BİRUNİ")
+    aliases = [_parent_alias(bilgi_parent_id, "bilgi")]
+
+    result = scan_entities_by_ngram(
+        "Merhaba, üniversite hakkında bilgi alabilir miyim? Biruni Üniversitesi",
+        [biruni],
+        aliases,
+    )
+    assert result.confidence == MatchConfidence.EXACT
+    assert result.university_id == biruni.id
+
+
+def test_parent_only_phrase_still_returns_parent_when_no_campus_present():
+    """When nothing more specific is in the phrase, the parent-alias hit
+    must still be returned (ranking must not silently discard real hits)."""
+    parent_id = uuid.uuid4()
+    aliases = [_parent_alias(parent_id, "bilgi")]
+
+    result = scan_entities_by_ngram(
+        "Merhaba, bilgi alabilir miyim?",
+        [],
+        aliases,
+    )
+    assert result.confidence == MatchConfidence.ALIAS
+    assert result.parent_university_id == parent_id
+    assert result.university_id is None
+
+
+def test_campus_wins_regardless_of_which_side_of_the_message_it_is_on():
+    """Position must not matter once a campus-level match exists anywhere
+    in the phrase — mirrors the real conversation shape (campus mention can
+    come before OR after the collision-prone boilerplate)."""
+    bilgi_parent_id = uuid.uuid4()
+    biruni = _uni("Biruni Üniversitesi", short_name="BİRUNİ")
+    aliases = [_parent_alias(bilgi_parent_id, "bilgi")]
+
+    before = scan_entities_by_ngram("Biruni Üniversitesi. Bilgi alabilir miyim?", [biruni], aliases)
+    after = scan_entities_by_ngram("Bilgi alabilir miyim? Biruni Üniversitesi.", [biruni], aliases)
+
+    for result in (before, after):
+        assert result.confidence == MatchConfidence.EXACT
+        assert result.university_id == biruni.id
+
+
+def test_ranking_prefers_exact_over_alias_regardless_of_ngram_length():
+    """A short EXACT campus hit must beat a longer ALIAS parent hit."""
+    parent_id = uuid.uuid4()
+    koc = _uni("Koç Üniversitesi", short_name="KOÇ")
+    aliases = [_parent_alias(parent_id, "uzun bir alias ifadesi")]
+
+    result = scan_entities_by_ngram(
+        "uzun bir alias ifadesi ve Koç Üniversitesi",
+        [koc],
+        aliases,
+    )
+    assert result.confidence == MatchConfidence.EXACT
+    assert result.university_id == koc.id
+
+
+def test_bare_common_word_token_does_not_produce_false_campus_match():
+    """Regression (real conversation cw1168): the incidental word 'bu'
+    ('this') must NOT match Beykent via its short_name 'BÜ' (normalizes to
+    'bu'). A stray common word deep in a message must never produce a
+    confident false campus match."""
+    beykent = _uni("Beykent Üniversitesi - Ayazağa Yerleşkesi", short_name="BÜ")
+    phrase = "aylık kişi başı ücret değil mi bu keten suites ile bu yıl çalışmıyosunuz galiba"
+    result = scan_entities_by_ngram(phrase, [beykent], [])
+    assert result.confidence == MatchConfidence.NONE
+
+
+def test_stopword_guard_does_not_block_a_real_multitoken_match():
+    """The guard is 1-gram only: a real university named in the same phrase
+    that also contains stopwords must still resolve."""
+    beykent = _uni("Beykent Üniversitesi - Ayazağa Yerleşkesi", short_name="BÜ")
+    koc = _uni("Koç Üniversitesi", short_name="KOÇ")
+    result = scan_entities_by_ngram("bu yıl Koç Üniversitesi'nde okuyorum", [beykent, koc], [])
+    assert result.confidence == MatchConfidence.EXACT
+    assert result.university_id == koc.id
+
+
 def test_should_match_campus_from_longer_message_via_ngram():
     parent_id = uuid.uuid4()
     goztepe_id = uuid.uuid4()
@@ -151,6 +245,16 @@ def test_normalize_empty():
 def test_normalize_strips_punctuation():
     assert normalize("İTÜ,") == "itu"
     assert normalize("a.b,c") == "a b c"
+
+
+def test_normalize_suffix_strip_is_word_boundary_aware():
+    """Regression: "Biruni" must NOT be chewed down to "bir" just because
+    the raw string happens to end with the substring "uni". Only a
+    trailing WHOLE TOKEN equal to a suffix (e.g. "üniversitesi") strips."""
+    assert normalize("Biruni") == "biruni"
+    assert normalize("BİRUNİ") == "biruni"
+    assert normalize("Biruni Üniversitesi") == "biruni"
+    assert normalize("biruni uni") == "biruni"
 
 
 # ---------------------------------------------------------------------------

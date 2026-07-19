@@ -64,7 +64,15 @@ class MatchResult:
 
 
 def normalize(text: str) -> str:
-    """Lowercase, strip Turkish diacritics, strip punctuation, strip university suffixes, trim."""
+    """Lowercase, strip Turkish diacritics, strip punctuation, strip university suffixes, trim.
+
+    Suffix stripping is word-boundary-aware: only a trailing WHOLE TOKEN
+    equal to one of _SUFFIXES is removed. A raw-substring strip (the old
+    behavior) incorrectly chewed "biruni" -> "bir", because "biruni" ends
+    with the literal substring "uni" even though that is not a separate
+    "üniversitesi"/"uni" suffix word — it's the tail of the proper noun
+    itself. Checking the last whitespace-separated token avoids this.
+    """
     # İ (U+0130) lowercases to i+combining-dot in Python; replace it first.
     text = text.replace("İ", "i").replace("I", "ı")
     text = text.lower().translate(_DIACRITIC_MAP)
@@ -72,10 +80,10 @@ def normalize(text: str) -> str:
     # Diacritics are already folded to ASCII above, so \w keeps letters/digits.
     text = re.sub(r"[^\w\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
-    for suffix in _SUFFIXES:
-        if text.endswith(suffix):
-            text = text[: -len(suffix)].strip()
-            break
+    if text:
+        tokens = text.split(" ")
+        if tokens[-1] in _SUFFIXES:
+            text = " ".join(tokens[:-1]).strip()
     return text
 
 
@@ -290,19 +298,96 @@ def match_campus(
     return None
 
 
+_ENTITY_CONFIDENCE_RANK: dict[MatchConfidence, int] = {
+    MatchConfidence.EXACT: 0,
+    MatchConfidence.ALIAS: 1,
+    MatchConfidence.LEVENSHTEIN: 2,
+    MatchConfidence.AMBIGUOUS: 3,
+}
+
+# Single-token common Turkish words that must never, ON THEIR OWN, be read as
+# a university signal when scanning free text. They collide with real
+# university short_names/aliases — e.g. "bu" ("this") == normalize("BÜ") ==
+# Beykent, "su" ("water") == normalize("SU") == Sabancı, "mu"/"mü" (question
+# particle) == a Marmara alias — and would otherwise produce a CONFIDENT
+# false campus match on an incidental word deep in a message (observed on a
+# real conversation: "...değil mi bu ... bu yıl..." resolving to Beykent).
+#
+# Applied ONLY to 1-gram candidates inside scan_entities_by_ngram (the
+# free-text phrase-gate path). Discrete-answer matching via match_university
+# is deliberately unaffected: a lead answering a direct "which university?"
+# question with a real abbreviation is a different, legitimate signal. Values
+# are already normalized (ascii-folded, lowercased) to match tokenize()'s
+# output. See UNIVERSITY_ACCURACY_PLAN.md WS3a and docs/alias_collision_check
+# C7/C8. This is the free-text-scan-scoped mitigation for the Tier-1
+# short_name common-word collisions that plan §0 deferred as too
+# broad to fix at the match_university level.
+_ENTITY_SCAN_STOPWORDS: frozenset[str] = frozenset({
+    "bu", "su", "mu", "o", "ve", "veya", "da", "de", "ki", "mi",
+    "ya", "ne", "cok", "az", "var", "yok", "icin", "ama", "ile", "gibi",
+})
+
+
 def scan_entities_by_ngram(
     text: str,
     universities: list[University],
     aliases: list[UniversityAlias],
 ) -> MatchResult:
     """
-    Phrase-gate Filter 2: scan 1–4 word n-grams (longest first) via match_university.
+    Phrase-gate Filter 2: scan 1–4 word n-grams via match_university and
+    return the single BEST match across the whole phrase (confidence-ranked,
+    not "first hit in scan order").
+
+    Ranking (best first):
+      1. campus-level (university_id set) beats parent-level (only
+         parent_university_id set) — a specific campus mention must never
+         lose to a broader, spurious parent-alias hit elsewhere in the text.
+      2. confidence: EXACT > ALIAS > LEVENSHTEIN > AMBIGUOUS.
+      3. longer n-gram (more specific) wins.
+      4. leftmost position wins (stable, deterministic tiebreak).
+
+    Single-token candidates that are bare common Turkish words
+    (_ENTITY_SCAN_STOPWORDS) are skipped, so an incidental "bu"/"su"/etc.
+    can't produce a confident false campus match via a colliding short_name.
+
+    Before this, the function returned the FIRST non-NONE match in scan
+    order (longest n-gram first, then left-to-right), with no notion of
+    confidence. That let a short, spurious parent-alias appearing early in
+    a message (e.g. a stray common-word alias in a greeting) beat a later,
+    more specific campus match purely because it was scanned first — see
+    UNIVERSITY_ACCURACY_PLAN.md WS2/WS3a.
     """
-    for candidate in scan_ngrams(text):
-        result = match_university(candidate, universities, aliases)
-        if result.confidence != MatchConfidence.NONE:
-            return result
-    return MatchResult(confidence=MatchConfidence.NONE)
+    words = tokenize(text)
+    if not words:
+        return MatchResult(confidence=MatchConfidence.NONE)
+
+    best: Optional[MatchResult] = None
+    best_key: Optional[tuple] = None
+
+    max_n = min(4, len(words))
+    for n in range(max_n, 0, -1):
+        for i in range(len(words) - n + 1):
+            candidate = " ".join(words[i : i + n])
+            # A bare common-word token must not, alone, be read as a
+            # university (see _ENTITY_SCAN_STOPWORDS). Multi-token candidates
+            # containing such a word are unaffected — only n==1 is guarded.
+            if n == 1 and candidate in _ENTITY_SCAN_STOPWORDS:
+                continue
+            result = match_university(candidate, universities, aliases)
+            if result.confidence == MatchConfidence.NONE:
+                continue
+            is_parent_only = result.university_id is None
+            key = (
+                1 if is_parent_only else 0,
+                _ENTITY_CONFIDENCE_RANK.get(result.confidence, 99),
+                -n,
+                i,
+            )
+            if best_key is None or key < best_key:
+                best_key = key
+                best = result
+
+    return best if best is not None else MatchResult(confidence=MatchConfidence.NONE)
 
 
 def match_hotel_by_ngram(text: str, hotels: list[Hotel]) -> Optional[Hotel]:
