@@ -1,0 +1,21 @@
+{
+  "round_id": "2026-07-16-a",
+  "flags": [
+    {
+      "cw_id": 665,
+      "kind": "label_wrong_applied",
+      "target": "universitede",
+      "note": "Mehmet — prospective student ('bu yıl üniversiteye gireceğim'), not yet enrolled"
+    },
+    {
+      "cw_id": 1164,
+      "kind": "attr_wrong",
+      "target": "gender",
+      "correct_value": "Erkek",
+      "note": "Hawi — veli looking for his son, student gender is male"
+    }
+  ],
+  "converter_notes": [
+    "Assia's English 'istanbul university' non-match is an intentional known gap — not flagged (assumed correct per exception rule)."
+  ]
+}

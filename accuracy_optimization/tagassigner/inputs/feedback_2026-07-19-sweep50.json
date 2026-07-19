@@ -1,0 +1,98 @@
+{
+  "round_id": "2026-07-19-sweep50",
+  "flags": [
+    {
+      "cw_id": 1328,
+      "kind": "identity_wrong",
+      "correct_value": "ogrenci",
+      "note": "Görkem — lead is the student ('başka konaklayacağım nereler var', 'Mimar Sinan Fındıklı kampüsündeyim', 'ben tek kişi salonda konaklamak için soruyorum'); labeled veli by mistake"
+    },
+    {
+      "cw_id": 1328,
+      "kind": "attr_wrong",
+      "target": "university",
+      "correct_value": "MSGSÜ - Beşiktaş",
+      "note": "Görkem — 'Mimar Sinan Fındıklı kampüsündeyim'; MSGSÜ (single-campus in DB, list value 'MSGSÜ - Beşiktaş'); came out withheld (bilinmiyor-kampus)"
+    },
+    {
+      "cw_id": 1154,
+      "kind": "attr_wrong",
+      "target": "university",
+      "correct_value": "İstanbul Üniversitesi",
+      "note": "İskender — 'İstanbul üniversitesi Amerikan Dili edebiyatı bölümünde'; withheld"
+    },
+    {
+      "cw_id": 1126,
+      "kind": "attr_wrong",
+      "target": "university",
+      "correct_value": "Boğaziçi - Ana Kampüs",
+      "note": "Gülçin — 'Boğaziçi güney kampüs' (güney/south = ana kampüs, Rumelihisarı); withheld"
+    },
+    {
+      "cw_id": 988,
+      "kind": "attr_wrong",
+      "target": "university",
+      "correct_value": "Biruni Üniversitesi",
+      "note": "Sinemhan — 'Biruni üniversitesi' answered to uni inquiry; single-campus; withheld"
+    },
+    {
+      "cw_id": 977,
+      "kind": "attr_wrong",
+      "target": "university",
+      "correct_value": "Biruni Üniversitesi",
+      "note": "A.Kaya — 'Biruni üniversitesine en yakın yer'; single-campus; withheld"
+    },
+    {
+      "cw_id": 937,
+      "kind": "attr_wrong",
+      "target": "university",
+      "correct_value": "Boğaziçi - Ana Kampüs",
+      "note": "ayse44klc — 'Boğaziçi üniversitesi ... Rumeli Hisarı' (= ana kampüs); withheld. Developer flags this as likely a DB/alias data gap"
+    },
+    {
+      "cw_id": 920,
+      "kind": "attr_wrong",
+      "target": "university",
+      "correct_value": "MSGSÜ - Beşiktaş",
+      "note": "Bilinmeyen — 'Mimar Sinan Üni Beyoğlu' (MSGSÜ, single-campus in DB); withheld. Developer flags as likely data gap"
+    },
+    {
+      "cw_id": 900,
+      "kind": "attr_wrong",
+      "target": "university",
+      "correct_value": "Üsküdar Üniversitesi",
+      "note": "Sami — 'ÜÜ Np Sağlık yerleşkesi' (= Üsküdar Üniversitesi NP); withheld. Developer flags as likely data gap"
+    },
+    {
+      "cw_id": 716,
+      "kind": "attr_wrong",
+      "target": "university",
+      "correct_value": "Üsküdar Üniversitesi",
+      "note": "Şükriye — 'Üsküdar üniversitesi' answered to uni inquiry; withheld"
+    },
+    {
+      "cw_id": 1067,
+      "kind": "label_missing",
+      "target": "yeni-giris",
+      "note": "Mine Koşun — 'YKS ye yeni girdi, sonuç bekliyoruz'; yeni-giris should be present"
+    },
+    {
+      "cw_id": 1067,
+      "kind": "identity_wrong",
+      "correct_value": "veli",
+      "note": "Mine Koşun — 'YKS ye yeni girdi, sonuç bekliyoruz' spoken about a third party → lead is the parent (veli)"
+    },
+    {
+      "cw_id": 707,
+      "kind": "label_wrong_applied",
+      "target": "veli",
+      "note": "Sıla — lead is the student ('Kız öğrenci', '2.sınıfı bitirdim yaz stajı'); veli wrongly applied"
+    }
+  ],
+  "converter_notes": [
+    "cw 650 (Nilay): developer flagged 'Türk Alman Üniversitesi' as not-set, but it IS set on Chatwoot (custom attribute university='Türk Alman Üniversitesi') and in DB (university_id resolves to 'Türk Alman Üniversitesi'). Not an error — NOT flagged.",
+    "cw 1138 (Farhan): developer flagged university not written for widget 'Üniversitem: Bahcesehir university'. Bahçeşehir is multi-campus in DB (Kuzey/Çırağan/Tıp) with no plain 'Bahçeşehir Üniversitesi' list value, and the lead stated no campus; current outcome bilinmiyor-kampus is a defensible withhold, not a concrete miss. NOT flagged as attr_wrong (no legal single correct_value).",
+    "cw 1067 (Mine Koşun): developer also flagged 'yerlesti' as wrongly added. TagAssigner did add it, but it was manually removed before this snapshot, so it is absent from the final end-state and cannot be graded as label_wrong_applied (would be a no-op). Captured here instead. The LLM-raw proposal still shows the erroneous 'yerlesti'.",
+    "Sıla: two conversations exist — cw 652 'Sıla' (labels: hizmet-veremiyoruz) and cw 707 'sıla' (labels: 3-sinif, info-check, veli). The 'veli wrongly added' complaint maps unambiguously to cw 707, the only one carrying veli."
+  ]
+}
