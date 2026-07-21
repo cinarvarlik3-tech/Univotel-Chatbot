@@ -10,7 +10,8 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from app.config import TAGASSIGNER_ROOM_TYPE_VALUES
-from app.db.models import Conversation
+from app.db.models import Conversation, Message
+from app.layers.matching import normalize
 from app.tagassigner.attribute_helpers import (
     UNIVERSITY_CAMPUS_AMBIGUOUS,
     gender_enum_to_display,
@@ -18,6 +19,55 @@ from app.tagassigner.attribute_helpers import (
     normalize_attribute_value,
     values_differ,
 )
+
+# TAGASSIGNER_ACCURACY_FIXES_PLAN.md A3 — inbound-only gender source guard. Standalone
+# (word-boundary) phrases only; normalized (ascii-folded, lowercased) token tuples.
+# For a veli, "kızım/oğlum (için)" legitimately reveal the housed STUDENT's gender, not
+# just the parent's own — that reading is intentional, not a leak.
+_FEMALE_GENDER_PHRASES: tuple[tuple[str, ...], ...] = (
+    ("kiz",), ("kiz", "ogrenci"), ("kadin",), ("bayan",),
+    ("kizim",), ("kiz", "cocugu"), ("kizim", "icin"),
+)
+_MALE_GENDER_PHRASES: tuple[tuple[str, ...], ...] = (
+    ("erkek",), ("erkek", "ogrenci"), ("bay",), ("oglum",),
+    ("erkek", "cocugu"), ("oglum", "icin"),
+)
+
+
+def _contains_phrase(tokens: list[str], phrase: tuple[str, ...]) -> bool:
+    n = len(phrase)
+    return any(tuple(tokens[i : i + n]) == phrase for i in range(len(tokens) - n + 1))
+
+
+def inbound_gender_signal(messages: list[Message]) -> Optional[str]:
+    """
+    Scan INBOUND messages only for an explicit gender statement about the student who
+    will stay. Returns "male" / "female" / None. Outbound (bot) text is never scanned —
+    the bot's own dorm-pitch text routinely contains gendered words ("...erkek öğrenci
+    yurdumuzdur") that must never be read as the lead's own gender (berkan, cw 924).
+
+    If both a female and male signal appear (contradictory input), returns None —
+    withhold rather than guess.
+    """
+    parts = [
+        (msg.content or "").strip()
+        for msg in messages
+        if msg.message_type == "inbound" and (msg.content or "").strip()
+    ]
+    if not parts:
+        return None
+
+    tokens = normalize(" ".join(parts)).split()
+    is_female = any(_contains_phrase(tokens, p) for p in _FEMALE_GENDER_PHRASES)
+    is_male = any(_contains_phrase(tokens, p) for p in _MALE_GENDER_PHRASES)
+
+    if is_female and is_male:
+        return None
+    if is_female:
+        return "female"
+    if is_male:
+        return "male"
+    return None
 
 
 @dataclass
@@ -54,11 +104,14 @@ def merge_attributes(
     current_university_display: Optional[str],
     resolved_university_id: Optional[uuid.UUID],
     chat_has_multiple_universities: bool = False,
+    inbound_gender: Optional[str] = None,
 ) -> AttributeMergeResult:
     """
     Merge Gemini's attribute snapshot against DB state under Router gates.
 
     resolved_university_id: FK from proposed university Chatwoot string (None if lookup failed).
+    inbound_gender: precomputed inbound_gender_signal(messages) result ("male"/"female"/
+        None) — the only source allowed to corroborate a concrete gender proposal (A3).
     """
     result = AttributeMergeResult()
 
@@ -70,7 +123,7 @@ def merge_attributes(
         chat_has_multiple_universities,
         result,
     )
-    _merge_gender(conv, proposed.get("ogrenci_cinsiyet", "bilinmiyor"), result)
+    _merge_gender(conv, proposed.get("ogrenci_cinsiyet", "bilinmiyor"), result, inbound_gender)
     _merge_oda_tiipi(conv, proposed.get("oda_tiipi", "boş"), result)
 
     return result
@@ -137,7 +190,12 @@ def _merge_university(
     result.chatwoot_patches["university"] = proposed_raw.strip()
 
 
-def _merge_gender(conv: Conversation, proposed_raw: str, result: AttributeMergeResult) -> None:
+def _merge_gender(
+    conv: Conversation,
+    proposed_raw: str,
+    result: AttributeMergeResult,
+    inbound_gender: Optional[str] = None,
+) -> None:
     current_display = gender_enum_to_display(conv.gender)
     if not values_differ(current_display, proposed_raw):
         return
@@ -164,6 +222,16 @@ def _merge_gender(conv: Conversation, proposed_raw: str, result: AttributeMergeR
             proposed=proposed_raw,
             reason="validation_failed",
         ))
+        return
+
+    # A3 — inbound-only source guard: a concrete gender proposal (Erkek/Kız) is only
+    # accepted when the lead's own inbound text corroborates it. No inbound signal (or a
+    # disagreeing one) silently withholds — this is deliberately NOT a blocked_mismatch:
+    # most leads never explicitly state gender, and treating that as an info-check-worthy
+    # conflict would flood info-check on nearly every conversation. Clearing to Bilinmiyor
+    # (gender_enum is None) needs no corroboration — the no-clear guard above already
+    # protects it.
+    if gender_enum is not None and inbound_gender != gender_enum:
         return
 
     # gender_display_to_enum returns None for Bilinmiyor — clear DB gender

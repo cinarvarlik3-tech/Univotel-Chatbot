@@ -170,6 +170,17 @@ def test_bare_common_word_token_does_not_produce_false_campus_match():
     assert result.confidence == MatchConfidence.NONE
 
 
+def test_beyoglu_stopword_prevents_alias_hijack_in_free_text_scan():
+    """A1 (TAGASSIGNER_ACCURACY_FIXES_PLAN.md) defense-in-depth: even if a 'beyoğlu'
+    alias existed (as it did before migration 028 removed it), a bare mention in free
+    text must never resolve via the _ENTITY_SCAN_STOPWORDS guard — beyoğlu is a
+    district, not a university identifier."""
+    msgsu = _uni("Mimar Sinan Güzel Sanatlar Üniversitesi - Fındıklı Kampüsü", short_name="MSGSÜ")
+    aliases = [_alias(msgsu.id, "beyoğlu")]
+    result = scan_entities_by_ngram("Istanbul Kent University Beyoğlu", [msgsu], aliases)
+    assert result.confidence == MatchConfidence.NONE
+
+
 def test_stopword_guard_does_not_block_a_real_multitoken_match():
     """The guard is 1-gram only: a real university named in the same phrase
     that also contains stopwords must still resolve."""

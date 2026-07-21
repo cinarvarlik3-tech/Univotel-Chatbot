@@ -232,10 +232,25 @@ def test_parent_alias_plus_match_campus_resolves_specific_campus(universe):
 
 
 def test_district_guard_returns_none(universe):
-    for phrase in ("kadıköy", "cevizlibağ", "hamidiye"):
+    for phrase in ("kadıköy", "cevizlibağ", "hamidiye", "beyoğlu"):
         result = canonicalize(phrase, universe)
         assert result.confidence == CanonConfidence.NONE, f"{phrase!r} should not resolve"
         assert result.university_id is None
+
+
+def test_token_containment_beyoglu_stoplist_prevents_hijack():
+    """A1 (TAGASSIGNER_ACCURACY_FIXES_PLAN.md) — the district stoplist entry for
+    'beyoglu' must strip it before windowing, even for a university whose own name
+    happens to contain the token: WITHOUT the stoplist entry, 'beyoğlu sanat' would
+    uniquely token-contain-match this fixture university; WITH it, only 'sanat'
+    remains (1 token, below the min-window guard) and the match correctly misses.
+    The real regression (emaan, cw559) lived at the ALIAS layer (migration 027/028),
+    which this stoplist does not reach — this test covers the token_containment
+    defense-in-depth path specifically."""
+    unis = _universities() + [
+        University(id=uuid.uuid4(), name="Beyoğlu Sanat Üniversitesi", university_short_name=None),
+    ]
+    assert token_containment("beyoğlu sanat", unis) is None
 
 
 def test_empty_phrase_returns_none(universe):
@@ -247,6 +262,72 @@ def test_empty_phrase_returns_none(universe):
 def test_faculty_only_phrase_returns_none(universe):
     result = canonicalize("tıp fakültesi", universe)
     assert result.confidence == CanonConfidence.NONE
+
+
+# ---------------------------------------------------------------------------
+# canonicalize — curated default campus (TAGASSIGNER_ACCURACY_FIXES_PLAN.md A4)
+# ---------------------------------------------------------------------------
+
+IU_DEFAULT_CAMPUS_ID = uuid.uuid4()  # stands in for the real İÜ Beyazıt campus
+
+
+@pytest.fixture
+def universe_with_default_campus():
+    universities = _universities() + [
+        University(
+            id=IU_DEFAULT_CAMPUS_ID,
+            name="İstanbul Üniversitesi İÜ - Beyazıt Kampüsü",
+            university_short_name=None,
+        ),
+    ]
+    parent_map = _parent_map() + [
+        UniversityParentMap(
+            university_id=IU_DEFAULT_CAMPUS_ID,
+            parent_university_id=IU_PARENT_ID,
+            campus_label="Beyazıt Kampüsü",
+        ),
+    ]
+    return _build_universe(
+        universities,
+        _aliases(),
+        parent_map,
+        default_campuses=[(IU_PARENT_ID, IU_DEFAULT_CAMPUS_ID)],
+    )
+
+
+def test_a4_curated_default_campus_resolves_on_bare_parent_mention(universe_with_default_campus):
+    """A bare 'istanbul' mention now resolves CAMPUS to the curated default instead of
+    withholding — same input that returns PARENT_ONLY on the base `universe` fixture
+    (test_bare_parent_alias_with_ambiguous_campuses_yields_parent_only)."""
+    result = canonicalize("istanbul", universe_with_default_campus)
+    assert result.confidence == CanonConfidence.CAMPUS
+    assert result.university_id == IU_DEFAULT_CAMPUS_ID
+
+
+def test_a4_non_curated_multi_campus_parent_still_withholds(universe_with_default_campus):
+    """Beykent (2 campuses, no curated entry) must still return PARENT_ONLY even in a
+    universe where a DIFFERENT parent (İÜ) has a curated default registered — the
+    default is a targeted exception, not a blanket multi-campus rule."""
+    result = canonicalize("beykent", universe_with_default_campus)
+    assert result.confidence == CanonConfidence.PARENT_ONLY
+    assert result.university_id is None
+
+
+def test_a4_explicit_campus_mention_still_wins_over_default(universe_with_default_campus):
+    """A lead naming a specific İÜ campus resolves to THAT campus, not the curated
+    default — the default branch only runs when no campus was otherwise resolvable."""
+    result = canonicalize(
+        "İstanbul Üniversitesi İÜ - Çapa Tıp Fakültesi", universe_with_default_campus
+    )
+    assert result.confidence == CanonConfidence.CAMPUS
+    assert result.university_id == CAPA_ID
+
+
+def test_universe_default_campus_by_parent_defaults_to_empty_dict():
+    """Backward compatibility: existing _build_universe callers that don't pass
+    default_campuses must be unaffected."""
+    universe = _build_universe(_universities(), _aliases(), _parent_map())
+    assert universe.default_campus_by_parent == {}
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +343,9 @@ async def test_universe_cache_avoids_repeated_db_calls():
         "app.db.queries.get_all_university_aliases", new=AsyncMock(return_value=_aliases())
     ) as mock_aliases, patch(
         "app.db.queries.get_all_university_parent_map", new=AsyncMock(return_value=_parent_map())
-    ) as mock_parents:
+    ) as mock_parents, patch(
+        "app.db.queries.get_all_parent_university_default_campuses", new=AsyncMock(return_value=[])
+    ) as mock_defaults:
         first = await get_university_universe()
         second = await get_university_universe()
 
@@ -270,6 +353,7 @@ async def test_universe_cache_avoids_repeated_db_calls():
         mock_unis.assert_called_once()
         mock_aliases.assert_called_once()
         mock_parents.assert_called_once()
+        mock_defaults.assert_called_once()
     reset_universe_cache()
 
 
@@ -282,6 +366,8 @@ async def test_universe_cache_force_refresh_reloads():
         "app.db.queries.get_all_university_aliases", new=AsyncMock(return_value=_aliases())
     ), patch(
         "app.db.queries.get_all_university_parent_map", new=AsyncMock(return_value=_parent_map())
+    ), patch(
+        "app.db.queries.get_all_parent_university_default_campuses", new=AsyncMock(return_value=[])
     ):
         await get_university_universe()
         await get_university_universe(force_refresh=True)

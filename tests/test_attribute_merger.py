@@ -2,8 +2,22 @@
 import uuid
 import pytest
 
-from app.db.models import Conversation
-from app.tagassigner.attribute_merger import merge_attributes, reconcile_chatwoot_attributes
+from app.db.models import Conversation, Message
+from app.tagassigner.attribute_merger import (
+    inbound_gender_signal,
+    merge_attributes,
+    reconcile_chatwoot_attributes,
+)
+
+
+def _msg(content, message_type: str = "inbound") -> Message:
+    return Message(
+        id=uuid.uuid4(),
+        conversation_id=uuid.uuid4(),
+        chatwoot_message_id=1,
+        content=content,
+        message_type=message_type,
+    )
 
 
 def _conv(**kwargs) -> Conversation:
@@ -162,3 +176,127 @@ def test_should_only_reconcile_bot_writable_keys():
     patches = reconcile_chatwoot_attributes(conv, {}, university_display=None)
     assert set(patches.keys()).issubset({"university", "ogrenci_cinsiyet", "oda_tiipi"})
     assert "ilgili_otel" not in patches
+
+
+# ---------------------------------------------------------------------------
+# A3 — inbound_gender_signal (TAGASSIGNER_ACCURACY_FIXES_PLAN.md)
+# ---------------------------------------------------------------------------
+
+def test_inbound_gender_signal_ignores_outbound_bot_pitch_text():
+    """berkan (cw924): the bot's 'erkek öğrenci yurdumuzdur' pitch is OUTBOUND and must
+    never be read as the lead's own gender."""
+    messages = [
+        _msg("Üniversitem: İstanbul Teknik Üniversitesi", "inbound"),
+        _msg("Academia Seyrantepe ... erkek öğrenci yurdumuzdur", "outbound"),
+        _msg("Maşallah fiyatlara bak", "inbound"),
+        _msg("teşekkürler", "inbound"),
+    ]
+    assert inbound_gender_signal(messages) is None
+
+
+def test_inbound_gender_signal_detects_bare_erkek_answer():
+    assert inbound_gender_signal([_msg("erkek", "inbound")]) == "male"
+
+
+def test_inbound_gender_signal_detects_bare_kiz_answer():
+    assert inbound_gender_signal([_msg("kız", "inbound")]) == "female"
+
+
+def test_inbound_gender_signal_detects_kizim_icin_as_female():
+    """A veli's 'kızım için' legitimately reveals the housed student's gender."""
+    assert inbound_gender_signal([_msg("kızım için soruyorum", "inbound")]) == "female"
+
+
+def test_inbound_gender_signal_detects_oglum_icin_as_male():
+    assert inbound_gender_signal([_msg("oğlum için bakıyorum", "inbound")]) == "male"
+
+
+def test_inbound_gender_signal_none_when_no_inbound_text():
+    messages = [_msg("erkek öğrenci yurdu", "outbound")]
+    assert inbound_gender_signal(messages) is None
+
+
+def test_inbound_gender_signal_none_when_contradictory():
+    messages = [_msg("kız", "inbound"), _msg("erkek", "inbound")]
+    assert inbound_gender_signal(messages) is None
+
+
+def test_inbound_gender_signal_empty_messages():
+    assert inbound_gender_signal([]) is None
+
+
+# ---------------------------------------------------------------------------
+# A3 — _merge_gender withholds without inbound corroboration
+# ---------------------------------------------------------------------------
+
+def test_merge_gender_withholds_concrete_proposal_with_no_inbound_signal():
+    """berkan shape: LLM proposes Erkek from contaminated bot text; no inbound
+    corroboration -> gender withheld, and NOT surfaced as a blocked_mismatch (would
+    otherwise flood info-check on every lead who simply hasn't stated gender yet)."""
+    conv = _conv()
+    result = merge_attributes(
+        conv,
+        {"university": "bilinmiyor", "ogrenci_cinsiyet": "Erkek", "oda_tiipi": "boş"},
+        current_university_display=None,
+        resolved_university_id=None,
+        inbound_gender=None,
+    )
+    assert result.gender is None
+    assert not result.gender_clear
+    assert "ogrenci_cinsiyet" not in result.chatwoot_patches
+    assert not result.blocked_mismatches
+
+
+def test_merge_gender_accepts_when_inbound_corroborates():
+    conv = _conv()
+    result = merge_attributes(
+        conv,
+        {"university": "bilinmiyor", "ogrenci_cinsiyet": "Erkek", "oda_tiipi": "boş"},
+        current_university_display=None,
+        resolved_university_id=None,
+        inbound_gender="male",
+    )
+    assert result.gender == "male"
+    assert result.chatwoot_patches["ogrenci_cinsiyet"] == "Erkek"
+
+
+def test_merge_gender_withholds_when_inbound_disagrees():
+    conv = _conv()
+    result = merge_attributes(
+        conv,
+        {"university": "bilinmiyor", "ogrenci_cinsiyet": "Erkek", "oda_tiipi": "boş"},
+        current_university_display=None,
+        resolved_university_id=None,
+        inbound_gender="female",
+    )
+    assert result.gender is None
+    assert not result.blocked_mismatches
+
+
+def test_merge_gender_clear_to_bilinmiyor_needs_no_inbound_corroboration():
+    """Clearing (LLM says Bilinmiyor) is a different path — the no-clear guard already
+    protects it; the inbound guard only gates a CONCRETE proposal."""
+    conv = _conv(gender="male")
+    result = merge_attributes(
+        conv,
+        {"university": "bilinmiyor", "ogrenci_cinsiyet": "Bilinmiyor", "oda_tiipi": "boş"},
+        current_university_display=None,
+        resolved_university_id=None,
+        inbound_gender=None,
+    )
+    assert result.gender is None
+    assert not result.gender_clear  # no-clear guard: don't erase an existing DB value
+
+
+def test_merge_gender_human_set_still_wins_regardless_of_inbound_signal():
+    conv = _conv(gender="female", gender_set_by="human")
+    result = merge_attributes(
+        conv,
+        {"university": "bilinmiyor", "ogrenci_cinsiyet": "Erkek", "oda_tiipi": "boş"},
+        current_university_display=None,
+        resolved_university_id=None,
+        inbound_gender="male",
+    )
+    assert result.gender is None
+    assert len(result.blocked_mismatches) == 1
+    assert result.blocked_mismatches[0].reason == "human_set"

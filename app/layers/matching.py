@@ -325,6 +325,12 @@ _ENTITY_CONFIDENCE_RANK: dict[MatchConfidence, int] = {
 _ENTITY_SCAN_STOPWORDS: frozenset[str] = frozenset({
     "bu", "su", "mu", "o", "ve", "veya", "da", "de", "ki", "mi",
     "ya", "ne", "cok", "az", "var", "yok", "icin", "ama", "ile", "gibi",
+    # "beyoglu" is a DISTRICT (TAGASSIGNER_ACCURACY_FIXES_PLAN.md A1) — MSGSÜ's Fındıklı
+    # campus sits in it, and migration 028 removed the alias that let a bare mention
+    # hijack any Beyoğlu-district lead. Defense-in-depth only: the alias DELETE is the
+    # functional fix. Also consumed by app.tagassigner.hizmet_veremiyoruz's 1-token
+    # out-of-city scan (condition c).
+    "beyoglu",
 })
 
 

@@ -1068,6 +1068,19 @@ async def get_all_university_parent_map() -> list[UniversityParentMap]:
     return [UniversityParentMap(**dict(r)) for r in rows]
 
 
+async def get_all_parent_university_default_campuses() -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """
+    (parent_university_id, university_id) curated default-campus pairs
+    (TAGASSIGNER_ACCURACY_FIXES_PLAN.md A4) — for in-memory caching alongside the rest
+    of the university matching universe.
+    """
+    pool = get_pool()
+    rows = await pool.fetch(
+        "SELECT parent_university_id, university_id FROM parent_university_default_campus"
+    )
+    return [(row["parent_university_id"], row["university_id"]) for row in rows]
+
+
 async def get_parent_university_by_id(parent_id: uuid.UUID) -> Optional[ParentUniversity]:
     pool = get_pool()
     row = await pool.fetchrow(

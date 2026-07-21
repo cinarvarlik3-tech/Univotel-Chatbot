@@ -25,13 +25,21 @@ from app.tagassigner.label_resolver import (
 )
 from app.tagassigner.deal_awaiting import apply_deal_awaiting
 from app.tagassigner.fiyat_soruyor import compute_fiyat_soruyor
+from app.tagassigner.hizmet_veremiyoruz import (
+    compute_hizmet_veremiyoruz,
+    strip_llm_hizmet_veremiyoruz,
+)
 from app.tagassigner.payload_builder import build_payload
 from app.tagassigner.university_list_context import load_formatted_university_list_lines
 from app.llm.factory import resolve_task_config
 from app.tagassigner.llm_client import call_llm
 from app.tagassigner.attribute_resolver import push_chatwoot_attribute_patches
 from app.tagassigner.llm_types import TagResult
-from app.tagassigner.attribute_merger import merge_attributes, reconcile_chatwoot_attributes
+from app.tagassigner.attribute_merger import (
+    inbound_gender_signal,
+    merge_attributes,
+    reconcile_chatwoot_attributes,
+)
 from app.tagassigner.attribute_helpers import UNIVERSITY_CAMPUS_AMBIGUOUS, gender_enum_to_display
 from app.tagassigner.info_check import apply_info_check, strip_gemini_info_check
 from app.tagassigner.university_resolver import resolve_university_list_value
@@ -191,8 +199,10 @@ async def apply_tagassigner_result(
         current_labels = await get_labels(conv.chatwoot_conversation_id) or conv.labels or []
 
     labels_for_resolve = strip_llm_fiyat_soruyor(
-        strip_gemini_deal_awaiting(
-            strip_gemini_info_check(result.labels)
+        strip_llm_hizmet_veremiyoruz(
+            strip_gemini_deal_awaiting(
+                strip_gemini_info_check(result.labels)
+            )
         )
     )
     resolved = resolve_labels(current_labels, labels_for_resolve)
@@ -217,6 +227,7 @@ async def apply_tagassigner_result(
     # scan finds nothing. Pure decision logic lives in
     # resolve_university_override — see its docstring for the full precedence.
     universe = await get_university_universe()
+    out_of_city_unis = await queries.get_all_out_of_city_universities()
     deterministic_mention = extract_university_phrase_from_messages(full_history)
     override_uni = resolve_university_override(
         proposed_uni,
@@ -252,6 +263,7 @@ async def apply_tagassigner_result(
         current_university_display=university_display,
         resolved_university_id=resolved_uni_id,
         chat_has_multiple_universities=False,
+        inbound_gender=inbound_gender_signal(full_history),
     )
 
     llm_patch_keys = set(merge_result.chatwoot_patches.keys())
@@ -313,8 +325,16 @@ async def apply_tagassigner_result(
 
     labels_with_fiyat = compute_fiyat_soruyor(full_history, info_decision.labels)
 
+    labels_with_hizmet = compute_hizmet_veremiyoruz(
+        deterministic_mention,
+        universe,
+        out_of_city_unis,
+        conv.university_id,
+        labels_with_fiyat,
+    )
+
     final_labels = await apply_deal_awaiting(
-        conv.university_id, conv.gender, labels_with_fiyat
+        conv.university_id, conv.gender, labels_with_hizmet
     )
     if set(final_labels) != set(current_labels):
         success = await _write_labels_with_retry(

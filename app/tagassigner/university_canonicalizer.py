@@ -51,6 +51,7 @@ DISTRICT_STOPLIST: frozenset[str] = frozenset({
     "atakoy", "atasehir", "kartal", "beylikduzu", "bakirkoy", "sisli",
     "umraniye", "uskudar", "fatih", "eyup", "gaziosmanpasa", "esenyurt",
     "dudullu", "hamidiye", "ayazaga",
+    "beyoglu",  # district; migration 028 removed the alias that hijacked it (A1)
 })
 
 
@@ -72,12 +73,17 @@ class UniversityUniverse:
     universities: list[University]
     aliases: list[UniversityAlias]
     campuses_by_parent: dict[uuid.UUID, list[UniversityParentMap]] = field(default_factory=dict)
+    # Curated default-campus map (spec: TAGASSIGNER_ACCURACY_FIXES_PLAN.md A4) — a SMALL,
+    # explicit exception list. Most multi-campus parents have no entry here and correctly
+    # keep withholding (PARENT_ONLY) on a bare mention.
+    default_campus_by_parent: dict[uuid.UUID, uuid.UUID] = field(default_factory=dict)
 
 
 def _build_universe(
     universities: list[University],
     aliases: list[UniversityAlias],
     parent_map: list[UniversityParentMap],
+    default_campuses: Optional[list[tuple[uuid.UUID, uuid.UUID]]] = None,
 ) -> UniversityUniverse:
     campuses_by_parent: dict[uuid.UUID, list[UniversityParentMap]] = {}
     for row in parent_map:
@@ -86,6 +92,7 @@ def _build_universe(
         universities=universities,
         aliases=aliases,
         campuses_by_parent=campuses_by_parent,
+        default_campus_by_parent=dict(default_campuses or []),
     )
 
 
@@ -147,8 +154,9 @@ def canonicalize(phrase: str, universe: UniversityUniverse) -> CanonResult:
       1. scan_entities_by_ngram exact/alias campus match -> CAMPUS.
       2. token_containment unique campus match -> CAMPUS.
       3. scan_entities_by_ngram parent match -> try match_campus on the phrase;
-         resolves to a campus -> CAMPUS; single-campus parent -> that campus
-         (CAMPUS); otherwise -> PARENT_ONLY (bilinmiyor-kampus).
+         resolves to a campus -> CAMPUS; single-campus parent -> that campus (CAMPUS);
+         parent has a curated default campus (A4) -> that campus (CAMPUS); otherwise ->
+         PARENT_ONLY (bilinmiyor-kampus).
       4. no signal -> NONE.
 
     This precedence is why an intentionally broad parent alias (e.g. a bare
@@ -179,6 +187,9 @@ def canonicalize(phrase: str, universe: UniversityUniverse) -> CanonResult:
             return CanonResult(CanonConfidence.CAMPUS, matched_campus.university_id)
         if len(campuses) == 1:
             return CanonResult(CanonConfidence.CAMPUS, campuses[0].university_id)
+        default_campus_id = universe.default_campus_by_parent.get(parent_id)
+        if default_campus_id is not None:
+            return CanonResult(CanonConfidence.CAMPUS, default_campus_id)
         return CanonResult(CanonConfidence.PARENT_ONLY)
 
     return CanonResult(CanonConfidence.NONE)
@@ -315,8 +326,9 @@ async def get_university_universe(force_refresh: bool = False) -> UniversityUniv
     universities = await queries.get_all_universities()
     aliases = await queries.get_all_university_aliases()
     parent_map = await queries.get_all_university_parent_map()
+    default_campuses = await queries.get_all_parent_university_default_campuses()
 
-    _cached_universe = _build_universe(universities, aliases, parent_map)
+    _cached_universe = _build_universe(universities, aliases, parent_map, default_campuses)
     _cached_at = now
     return _cached_universe
 
