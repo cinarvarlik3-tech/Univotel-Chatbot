@@ -12,6 +12,7 @@ from app.llm.factory import validate_llm_config
 from app.db.client import create_pool, close_pool
 from app.health.integrity_check import run_integrity_check, start_daily_integrity_sweep
 from app.background.reprompt_sweep import start_reprompt_sweep
+from app.background.keepalive import start_keepalive_sweep
 from app.tagassigner.trigger import (
     start_idle_scan_sweep,
     start_midnight_reset_sweep,
@@ -46,6 +47,7 @@ async def lifespan(app: FastAPI):
     _background_tasks.append(asyncio.create_task(start_idle_scan_sweep()))
     _background_tasks.append(asyncio.create_task(start_midnight_reset_sweep()))
     _background_tasks.append(asyncio.create_task(start_nightly_batch_sweep()))
+    _background_tasks.append(asyncio.create_task(start_keepalive_sweep()))
     logger.info("Univotel Chatbot started")
     yield
     for task in _background_tasks:
@@ -112,13 +114,22 @@ from app.webhooks.chatwoot import router as chatwoot_router  # noqa: E402
 from app.webhooks.internal import router as internal_router  # noqa: E402
 from app.webhooks.batch_results import router as batch_results_router  # noqa: E402
 from app.diagnostics.router import router as diagnostics_router  # noqa: E402
+from dashboard.api.router import router as dashboard_router  # noqa: E402
 
 app.include_router(chatwoot_router)
 app.include_router(internal_router)
 app.include_router(batch_results_router)
 app.include_router(diagnostics_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# Must stay LAST: registers the dashboard SPA catch-all, which would shadow any
+# route added after it. See dashboard/api/static.py.
+from dashboard.api.static import mount_dashboard  # noqa: E402
+
+mount_dashboard(app)

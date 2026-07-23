@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Dark-only: the transcript is specified black, and a second validated palette
+   buys nothing here (DASHBOARD_SPEC.md §6). */
+:root {
+  color-scheme: dark;
+  --nav-w: 248px;
+  --panel-w: 480px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-page text-ink font-sans antialiased;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Digits must align in every table and card. */
+table,
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@layer components {
+  .card {
+    @apply bg-surface border border-border rounded-lg;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-border
+           bg-surface2 px-3 text-ink2 transition-colors
+           hover:border-status-interrupt hover:text-ink
+           focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
+           focus-visible:outline-status-interrupt
+           disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-border;
+    height: 28px;
+    font-size: 12px;
+  }
+
+  /* The two row actions are specified as identical in size and shape. */
+  .btn-row {
+    @apply btn;
+    min-width: 104px;
+  }
+
+  .btn-icon {
+    @apply inline-flex items-center justify-center rounded-md border border-transparent
+           text-ink2 transition-colors hover:bg-surface2 hover:text-ink
+           focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
+           focus-visible:outline-status-interrupt;
+    height: 28px;
+    width: 28px;
+  }
+
+  .input {
+    @apply rounded-md border border-border bg-surface2 px-2.5 text-ink
+           placeholder:text-ink3
+           focus:border-status-interrupt focus:outline-none;
+    height: 28px;
+    font-size: 12px;
+  }
+
+  .th {
+    @apply sticky top-0 z-10 bg-surface2 px-3 py-2 text-left font-medium text-ink2
+           border-b border-border whitespace-nowrap;
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .td {
+    @apply px-3 py-2 align-middle border-b border-border/60;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 whitespace-nowrap;
+    font-size: 11px;
+  }
+
+  .skeleton {
+    @apply animate-pulse rounded bg-surface2;
+  }
+}
+
+/* Recessive, consistent scrollbars — the default light ones flash on a black page. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2f3846 transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2f3846;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

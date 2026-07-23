@@ -8,3 +8,9 @@ __pycache__/
 *.egg-info/
 .vscode/
 .idea/
+
+# Dashboard frontend. dashboard/dist is deliberately NOT ignored: Railway runs a
+# Python-only buildpack and will not execute npm, so the built assets are
+# committed. See dashboard/README.md.
+dashboard/web/node_modules/
+dashboard/web/.vite/

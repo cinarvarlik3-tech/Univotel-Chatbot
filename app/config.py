@@ -66,6 +66,15 @@ class Settings(BaseSettings):
     # Univotel CRM Postgres (read-only import for tag importConvo testing).
     crm_database_url: Optional[str] = None
 
+    # Dashboard (/infogatherer — see DASHBOARD_SPEC.md). Declared here because
+    # Settings forbids extra keys, so any DASHBOARD_* entry in .env would
+    # otherwise fail validation and take the whole app down at import time.
+    # All optional: an unset value degrades the dashboard alone (503), never the
+    # webhook pipeline. Read via dashboard.api.config, not directly.
+    dashboard_user: Optional[str] = None
+    dashboard_password: Optional[str] = None
+    dashboard_stale_hours: int = 24
+
     @field_validator("database_url")
     @classmethod
     def database_url_must_be_postgres(cls, v: str) -> str:
