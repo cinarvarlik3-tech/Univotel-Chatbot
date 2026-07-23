@@ -73,6 +73,9 @@ class Conversation(BaseModel):
     bot_enabled: bool = True
     last_divergence_intent: Optional[str] = None
     divergence_repeat_count: int = 0
+    # Spec 031 — first-sight Chatwoot history backfill + InfoGatherer abstain analytics
+    history_backfilled_at: Optional[datetime] = None
+    infogatherer_abstain_reason: Optional[str] = None
 
 
 class DivergenceAction(str, Enum):
@@ -131,6 +134,7 @@ class RecEngineLog(BaseModel):
     idempotency_key: uuid.UUID
     status: str
     hotel_rec: Optional[uuid.UUID] = None
+    hotel_recs: Optional[list[uuid.UUID]] = None
 
 
 class ChatbotLog(BaseModel):

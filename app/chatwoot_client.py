@@ -9,6 +9,7 @@ from typing import Any, Optional
 import httpx
 
 from app.config import settings
+from app.diagnostics.trace import trace_event_async
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,22 @@ async def send_message(chatwoot_conversation_id: int, content: str) -> SendResul
             resp = await client.post(url, json={"content": content, "message_type": "outgoing"}, headers=_HEADERS)
         if resp.status_code == 200:
             data = resp.json()
+            await trace_event_async(
+                "chatwoot",
+                "api_send_message_ok",
+                chatwoot_conversation_id=chatwoot_conversation_id,
+                chatwoot_message_id=data.get("id"),
+            )
             return SendResult(ok=True, status_code=200, message_id=data.get("id"))
         logger.error("send_message: HTTP %d for conversation %d", resp.status_code, chatwoot_conversation_id)
+        await trace_event_async(
+            "chatwoot",
+            "api_send_message_fail",
+            level="error",
+            chatwoot_conversation_id=chatwoot_conversation_id,
+            status_code=resp.status_code,
+            body_preview=resp.text[:200],
+        )
         return SendResult(ok=False, status_code=resp.status_code, error=resp.text)
     except httpx.TimeoutException:
         logger.error("send_message: TIMEOUT for conversation %d", chatwoot_conversation_id)

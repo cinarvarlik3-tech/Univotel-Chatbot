@@ -13,6 +13,7 @@ from typing import Optional
 
 from app.db import queries
 from app.db.models import ChatbotLog, Conversation, DivergenceAction, RoutingDecision
+from app.diagnostics.trace import trace_event_async
 from app.layers.matching import (
     MatchConfidence,
     is_near_miss_university,
@@ -29,6 +30,9 @@ from app.layers.divergence_classifier import Intent
 from app.background.send_retry import send_with_retry
 
 logger = logging.getLogger(__name__)
+
+# Pause between consecutive outbound schema messages (Chatwoot rate limits).
+_INTER_MESSAGE_DELAY_SECONDS = 1.5
 
 UNIVERSITY_KEYWORDS = re.compile(
     r"(Üniversitesi|Universitesi|Üni|uni\b)",
@@ -82,11 +86,99 @@ async def _send_hotel_responses(
     chatwoot_id: int,
     hotel_id: uuid.UUID,
 ) -> bool:
-    contents = await queries.get_canned_responses_for_hotel(hotel_id)
-    if not contents:
+    """Send all schema lines for one hotel (sentinel / legacy single-id paths)."""
+    if queries.is_recengine_sentinel_hotel_id(hotel_id):
+        contents = await queries.get_canned_responses_for_hotel(hotel_id)
+        if not contents:
+            logger.fatal(
+                "InfoGatherer: no response_schemas rows for hotel_id=%s (conversation=%s)",
+                hotel_id, conversation_id,
+            )
+            await queries.write_log(ChatbotLog(
+                conversation_id=conversation_id,
+                operation_layer=LAYER,
+                which_run="outputRun",
+                log_level="fatal",
+                is_success=False,
+                status_code="404",
+                explanation=f"No matching row in response_schemas for hotel_id={hotel_id}",
+            ))
+            await queries.set_conversation_human_needed(conversation_id)
+            await _write_human_needed_label(chatwoot_id)
+            return False
+
+        for content in contents:
+            result = await send_with_retry(chatwoot_id, content)
+            if not result.ok:
+                logger.error(
+                    "InfoGatherer: failed to send canned response for hotel_id=%s", hotel_id
+                )
+                return False
+            await asyncio.sleep(_INTER_MESSAGE_DELAY_SECONDS)
+        return True
+
+    sent = await _send_all_eligible_hotel_responses(
+        conversation_id, chatwoot_id, [hotel_id], escalate_if_none_sent=True,
+    )
+    return sent > 0
+
+
+async def _send_all_eligible_hotel_responses(
+    conversation_id: uuid.UUID,
+    chatwoot_id: int,
+    hotel_ids: list[uuid.UUID],
+    *,
+    escalate_if_none_sent: bool,
+) -> int:
+    """
+    Send response_schemas for each eligible hotel in order.
+    Lenient: skip hotels with no schemas; retry failed sends once after the first pass.
+    Returns the number of messages successfully delivered.
+    """
+    real_ids = [
+        hid for hid in hotel_ids
+        if not queries.is_recengine_sentinel_hotel_id(hid)
+    ]
+    failures: list[tuple[uuid.UUID, str]] = []
+    sent_count = 0
+
+    async def _attempt(content: str) -> bool:
+        result = await send_with_retry(chatwoot_id, content)
+        return result.ok
+
+    async def _send_content(hotel_id: uuid.UUID, content: str, track_failures: bool) -> None:
+        nonlocal sent_count
+        if await _attempt(content):
+            sent_count += 1
+            await asyncio.sleep(_INTER_MESSAGE_DELAY_SECONDS)
+        elif track_failures:
+            failures.append((hotel_id, content))
+
+    for hotel_id in real_ids:
+        contents = await queries.get_canned_responses_for_hotel(hotel_id)
+        if not contents:
+            logger.warning(
+                "InfoGatherer: no response_schemas for hotel_id=%s (conversation=%s) — skipping",
+                hotel_id, conversation_id,
+            )
+            continue
+        for content in contents:
+            await _send_content(hotel_id, content, track_failures=True)
+
+    for hotel_id, content in failures:
+        if await _attempt(content):
+            sent_count += 1
+            await asyncio.sleep(_INTER_MESSAGE_DELAY_SECONDS)
+        else:
+            logger.error(
+                "InfoGatherer: permanent send failure hotel_id=%s conversation=%s",
+                hotel_id, conversation_id,
+            )
+
+    if sent_count == 0 and escalate_if_none_sent:
         logger.fatal(
-            "InfoGatherer: no response_schemas rows for hotel_id=%s (conversation=%s)",
-            hotel_id, conversation_id,
+            "InfoGatherer: zero schema messages sent for conversation=%s hotels=%s",
+            conversation_id, real_ids,
         )
         await queries.write_log(ChatbotLog(
             conversation_id=conversation_id,
@@ -95,20 +187,17 @@ async def _send_hotel_responses(
             log_level="fatal",
             is_success=False,
             status_code="404",
-            explanation=f"No matching row in response_schemas for hotel_id={hotel_id}",
+            explanation="No response schema messages could be sent for eligible hotels",
         ))
         await queries.set_conversation_human_needed(conversation_id)
         await _write_human_needed_label(chatwoot_id)
-        return False
+    elif failures:
+        logger.warning(
+            "InfoGatherer: partial schema delivery conversation=%s sent=%d hotels=%s",
+            conversation_id, sent_count, real_ids,
+        )
 
-    for content in contents:
-        result = await send_with_retry(chatwoot_id, content)
-        if not result.ok:
-            logger.error(
-                "InfoGatherer: failed to send canned response for hotel_id=%s", hotel_id
-            )
-            return False
-    return True
+    return sent_count
 
 
 async def _fire_hotel_path(
@@ -350,7 +439,8 @@ async def _activate_flow(
             cid, "awaiting_university", conversation.flow_state
         )
         if advanced:
-            await _send_canned(cwid, CANNED_HANGI)
+            if not await queries.has_automation_outbound(cid):
+                await _send_canned(cwid, CANNED_HANGI)
         return
 
     if flow_state == "awaiting_university":
@@ -698,10 +788,26 @@ async def process_message(
 
     if state in ("stopped", "human_needed"):
         logger.info("InfoGatherer: conversation %s is terminal (%s) — no action", cid, state)
+        await trace_event_async(
+            "infoGatherer",
+            "terminal_no_action",
+            level="warn",
+            chatwoot_conversation_id=cwid,
+            conversation_id=cid,
+            flow_state=state,
+        )
         return
 
     if not conversation.bot_enabled:
         logger.info("InfoGatherer: conversation %s bot_enabled=false — no action", cid)
+        await trace_event_async(
+            "infoGatherer",
+            "bot_disabled",
+            level="warn",
+            chatwoot_conversation_id=cwid,
+            conversation_id=cid,
+            abstain_reason=conversation.infogatherer_abstain_reason,
+        )
         return
 
     if not content:

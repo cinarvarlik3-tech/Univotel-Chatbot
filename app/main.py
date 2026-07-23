@@ -18,6 +18,7 @@ from app.tagassigner.trigger import (
     start_nightly_batch_sweep,
 )
 from app.tagassigner.queue import start_queue_drain
+from app.diagnostics.trace import get_trace_hub, trace_event_async
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,11 @@ async def lifespan(app: FastAPI):
     )
     validate_llm_config()
     await run_integrity_check(fatal_on_failure=not settings.integrity_check_bypass)
+    trace_on = settings.live_trace_enabled or settings.live_testing_mode
+    get_trace_hub().configure(
+        enabled=trace_on,
+        jsonl_path=settings.live_trace_jsonl_path if trace_on else None,
+    )
     _background_tasks.append(asyncio.create_task(start_reprompt_sweep()))
     _background_tasks.append(asyncio.create_task(start_daily_integrity_sweep()))
     _background_tasks.append(asyncio.create_task(start_queue_drain()))
@@ -59,31 +65,58 @@ async def request_diagnostics(request: Request, call_next):
     up in the terminal as a 500 with a stack trace instead of a bare 502.
     """
     start = time.monotonic()
-    logger.info("→ %s %s", request.method, request.url.path)
+    path = request.url.path
+    logger.info("→ %s %s", request.method, path)
+    if path.startswith(("/webhooks", "/internal")) or path == "/health":
+        await trace_event_async(
+            "http",
+            "request_start",
+            method=request.method,
+            path=path,
+        )
     try:
         response = await call_next(request)
     except Exception:
         elapsed_ms = (time.monotonic() - start) * 1000
         logger.error(
             "✗ %s %s UNHANDLED EXCEPTION after %.0fms\n%s",
-            request.method, request.url.path, elapsed_ms, traceback.format_exc(),
+            request.method, path, elapsed_ms, traceback.format_exc(),
+        )
+        await trace_event_async(
+            "http",
+            "request_exception",
+            level="error",
+            method=request.method,
+            path=path,
+            elapsed_ms=round(elapsed_ms, 1),
         )
         return JSONResponse(status_code=500, content={"status": "internal_error"})
     elapsed_ms = (time.monotonic() - start) * 1000
     logger.info(
         "← %s %s %d %.0fms",
-        request.method, request.url.path, response.status_code, elapsed_ms,
+        request.method, path, response.status_code, elapsed_ms,
     )
+    if path.startswith(("/webhooks", "/internal")) or path == "/health":
+        await trace_event_async(
+            "http",
+            "request_end",
+            method=request.method,
+            path=path,
+            status_code=response.status_code,
+            elapsed_ms=round(elapsed_ms, 1),
+        )
     return response
 
 
 from app.webhooks.chatwoot import router as chatwoot_router  # noqa: E402
 from app.webhooks.internal import router as internal_router  # noqa: E402
 from app.webhooks.batch_results import router as batch_results_router  # noqa: E402
+from app.diagnostics.router import router as diagnostics_router  # noqa: E402
 
 app.include_router(chatwoot_router)
 app.include_router(internal_router)
 app.include_router(batch_results_router)
+app.include_router(diagnostics_router)
 
 
 @app.get("/health")

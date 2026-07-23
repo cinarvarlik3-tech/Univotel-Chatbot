@@ -8,37 +8,38 @@ This README is the primary onboarding document for engineers new to the project.
 
 ## Current Project Stage (July 2026)
 
-**Deployment:** Single Railway web process, `TESTING_LIMITATIONS_MODE` on (2-phone allowlist). Chatwoot webhooks → debounced InfoGatherer → RecEngine → canned hotel responses; TagAssigner runs in parallel via queue/idle scan.
+**Deployment:** Single Railway web process. Production still uses **`TESTING_LIMITATIONS_MODE`** (2-phone allowlist) or **`LIVE_TESTING_MODE`** (capped real conversations, spec 022) for safe validation. Chatwoot webhooks → debounced InfoGatherer (first-sight backfill, automation gate) → RecEngine (multi-hotel when eligible) → canned responses; TagAssigner runs in parallel via queue/idle scan.
 
 | Area | Status | Notes |
 |------|--------|-------|
-| **InfoGatherer** | Shipped | Phrase gate, matching, campus escalation, gender capture, two-strike clarify, out-of-city path, **divergence recovery** (spec 019/020), inbound debounce |
-| **Divergence recovery** | Shipped | Gemini intent classifier + DB routing table → canned answer / re-anchor / escalate; Suite D-FIX2 verified (July 2026) |
-| **RecEngine** | Shipped | Gender + university → `priority_score` selection; retry ladder; deal_awaiting sentinels |
-| **TagAssigner (V1)** | Shipped in code | Router, label resolver, attribute merger, `info-check`, batch path (batch submit may be stubbed) |
-| **Answer classifier** | Legacy / tests only | `answer_classifier.py` retained for unit tests; production `awaiting_university` path uses divergence recovery instead |
-| **FallBack (V2)** | Not started | Residual “call FallBack” paths → silent `human_needed` or divergence escalate |
-| **Unit tests** | 261 passing | `pytest` — no CI wired yet |
-| **Live conversational tests** | F-suite, O-suite, Suite D documented | [F1–F10](docs/wa_test_links.md), [O1–O10](docs/wa_test_off_script_detection.md), [Suite D-FIX2](docs/suite_D_FIX2_verification.md) |
+| **InfoGatherer** | Shipped + live-test hardening | Phrase gate, matching, divergence recovery, debounce (timer flush fix), **first-sight Chatwoot backfill** + abstain rules (spec 031), **Chatwoot automation outbound** not treated as human takeover |
+| **Divergence recovery** | Shipped | Gemini classifier + routing table; Suite D-FIX2 verified |
+| **RecEngine** | Shipped | Gender + university → hotels; **multi-hotel send** when several properties qualify (migration 031); retry ladder; deal_awaiting |
+| **TagAssigner (V1)** | Shipped + **university capture optimization** | Canonicalizer, `hizmet_veremiyoruz`, alias hygiene (026–029), geo-only rules; **~93% router university A3** on 197-conversation sweep (July 2026) — see `accuracy_optimization/tagassigner/results/` |
+| **Live trace / diagnostics** | Shipped (dev/live test) | `/diagnostics`, `/diagnostics/flow`, JSONL ring buffer — [docs/live_trace_diagnostics.md](docs/live_trace_diagnostics.md) |
+| **Answer classifier** | Legacy / tests only | Production uses divergence recovery |
+| **FallBack (V2)** | Not started | Residual paths → silent `human_needed` or divergence escalate |
+| **Prove Otherwise (identity veto)** | **Experimental branch only** | Not on `main`; separate branch — do not merge without explicit review |
+| **Unit tests** | **505 passing** | `pytest` — no CI wired yet |
+| **Live conversational tests** | F / O / Suite D + ngrok live tests | Spec 031 checklist; use fresh Chatwoot threads for greenfield InfoGatherer |
 
-### Blockers before production (`TESTING_LIMITATIONS_MODE=off`)
+### Blockers before production (`TESTING_LIMITATIONS_MODE=off`, full traffic)
 
-1. **Migrations 001–021** applied on ChatBot DB — especially **013**, **014**, **015**, **016**, **017**, **018** (divergence), **020** (`messages.sent_at`). Without **017**, RecEngine callback fails on `ilgili_otel_set_by` CHECK.
+1. **Migrations 001–031** (and ops SQL such as `002_hau_final_review_sync.sql` where used) on ChatBot DB — especially **017**, **018**, **020**, **030** (InfoGatherer abstain / backfill columns).
 2. **Suite A & B** — hotel data-state audit + alias collision script exit 0.
 3. **Integrity check** clean boot with `INTEGRITY_CHECK_BYPASS=off`.
-4. **TagAssigner accuracy tuning** — batch on 20–100 historical leads before full launch (planned next step).
-5. **Product decisions** — see [Known Issues & Open Decisions](#known-issues--open-decisions) (RecEngine geography, phrase-gate warmth on first message).
+4. **TagAssigner** — continue accuracy sweeps; helper-mode / write-gate spec 030 as needed.
+5. **Product decisions** — see [Known Issues & Open Decisions](#known-issues--open-decisions).
 
 ### Recently completed (July 2026)
 
-- **Divergence recovery** (spec 019) — LLM classifier + `divergence_routing` table; price/location/payment/coverage intents answered mid-flow with re-anchor (migration 018).
-- **Spec 020.1 pre-ship fixes** — inverted no-match gate, punctuation in `normalize()`, İTÜ Ayazağa alias, question-form guard, alias fuzzy (dist-1) for parent-name typos.
-- **Inbound debounce** — coalesce rapid messages using Chatwoot `sent_at` cadence; per-conversation processing lock (migration 020).
-- **Coverage no-reanchor** — `logistics_coverage` in `awaiting_university` confirms Istanbul-only without re-asking university (migration 021).
-- Multi-filter **phrase gate** (fixes F-suite step-1 greeting failures).
-- **Invalid-input two-strike** for university/campus (`clarification_attempt`, migration 014).
-- **Out-of-city universities** table + `/istanbul` terminal path (migration 015).
-- **TagAssigner attributes spec 018** — `set_by` companions, attribute merger, Router-owned `info-check` label.
+- **TagAssigner university capture** — canonicalizer, campus/default-campus seeds (027–029), beyoğlu alias fix (028), `hizmet_veremiyoruz` router logic; graded sweep200 accuracy report.
+- **InfoGatherer live-test readiness (spec 031)** — automation template detection, persist debounced inbound on human takeover, first-sight backfill abstain (`prior_history` / `backfill_failed`), `infogatherer_abstain_reason`.
+- **Debounce self-cancel fix** — `_pop_debounce_state` no longer cancels the timer task that is flushing; inbound persist + InfoGatherer runs reliably with `DEBOUNCE_WINDOW_SECONDS > 0`.
+- **RecEngine multi-hotel** — send all gender/HAU-visible hotels when multiple match (migration 031).
+- **HAu review sync** — trimmed `hotel_accessible_universities` dataset (`002_hau_final_review_sync.sql`, round-4 review docs).
+- **Live trace diagnostics** — webhook → debounce → InfoGatherer → outbound tracing for live tests.
+- Earlier: divergence recovery (018–021), debounce `sent_at` (020), TagAssigner attributes (018), phrase gate / matching fixes.
 
 ---
 
@@ -245,7 +246,7 @@ curl http://localhost:8000/health
 ### Running tests
 
 ```bash
-# Unit tests (261 tests; integration marker exists but no integration tests checked in)
+# Unit tests (505+; integration marker exists but no integration tests checked in)
 pytest
 
 # Include integration tests when added (requires live DATABASE_URL)
@@ -277,6 +278,11 @@ Copy `.env.example` to `.env`. All secrets live in environment variables only �
 | `DEBOUNCE_WINDOW_SECONDS` | No | Default: `3` — coalesce rapid inbound messages by customer send cadence; `0` = disabled |
 | `LOG_LEVEL` | No | Default: `info` |
 | `TESTING_LIMITATIONS_MODE` | No | When `true`, only process two allowlisted phone numbers |
+| `LIVE_TESTING_MODE` | No | When `true`, admit real leads up to `LIVE_TESTING_LIMIT` (mutually exclusive with testing limitations mode) |
+| `LIVE_TESTING_LIMIT` | Live test | Max conversation rows when live testing mode is on |
+| `OUTBOUND_BLOCK` | No | When `true`, suppress lead-facing sends (labels/attributes still write) |
+| `LIVE_TRACE_ENABLED` | No | Structured trace + `/diagnostics` UI (auto-on when `LIVE_TESTING_MODE=true`) |
+| `LIVE_TRACE_JSONL_PATH` | No | Default `logs/live_trace.jsonl` |
 | `INTEGRITY_CHECK_BYPASS` | No | When `true`, skip fatal boot integrity check |
 
 ### Testing mode allowlist
@@ -314,10 +320,12 @@ Univotel Chatbot/
 │   │   ├── models.py                # Pydantic DTOs mirroring tables
 │   │   └── queries.py               # All SQL access (~1040 lines — single data layer)
 │   ├── webhooks/
-│   │   ├── chatwoot.py              # POST /webhooks/chatwoot — primary inbound entry
+│   │   ├── chatwoot.py              # POST /webhooks/chatwoot — debounce, first-sight backfill, automation gate
 │   │   ├── internal.py              # RecEngine start + InfoGatherer callback
 │   │   └── batch_results.py         # POST /webhooks/batch-results — Gemini batch callback
+│   ├── diagnostics/                 # Live trace ring buffer + /diagnostics UI (live testing)
 │   ├── layers/
+│   │   ├── automation_gate.py       # Chatwoot automation template detection (spec 031)
 │   │   ├── info_gatherer.py         # ContextRun state machine + divergence orchestration
 │   │   ├── phrase_gate.py           # First-message gate (7 filters + pre-conditions A/B)
 │   │   ├── divergence_classifier.py # Gemini intent classifier (spec 019)
@@ -344,9 +352,12 @@ Univotel Chatbot/
 │       ├── attribute_merger.py      # Merge Gemini attributes vs DB/human (spec 018)
 │       ├── attribute_helpers.py     # Shared attribute normalization helpers
 │       ├── info_check.py            # Router-owned info-check label logic
+│       ├── hizmet_veremiyoruz.py    # Router-owned hizmet-veremiyoruz label logic
+│       ├── university_canonicalizer.py  # Deterministic university list resolution (Mode C)
 │       └── conflict.py              # Option-A timestamp conflict rule for ilgili_otel
-├── migrations/                      # 21 SQL migrations (001–021), applied manually
-├── tests/                           # 20 unit test modules (261 tests)
+├── accuracy_optimization/tagassigner/  # Sweep inputs, feedback JSON, accuracy reports
+├── migrations/                      # SQL migrations 001–031 (+ ops sync scripts), applied manually
+├── tests/                           # Unit tests (505+); integration marker reserved
 ├── docs/                            # Specs, audits, test plans, SQL audit scripts
 ├── system_prompts/
 │   ├── tagassigner_prompt.md        # Gemini system prompt for TagAssigner
@@ -390,6 +401,8 @@ Univotel Chatbot/
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | `GET` | `/health` | None | Liveness probe → `{"status":"ok"}` |
+| `GET` | `/diagnostics` | None | Live trace SSE stream (live testing) |
+| `GET` | `/diagnostics/flow` | None | Per-conversation pipeline timeline |
 | `POST` | `/webhooks/chatwoot` | Chatwoot HMAC | Inbound Chatwoot events |
 | `POST` | `/internal/recengine/start` | `X-Internal-Secret` | InfoGatherer triggers RecEngine |
 | `POST` | `/internal/infogatherer/callback` | `X-Internal-Secret` | RecEngine completion callback |
@@ -402,11 +415,12 @@ FastAPI also exposes `/docs`, `/redoc`, `/openapi.json` automatically.
 1. Verify HMAC (`X-Chatwoot-Signature` over `timestamp.body`) — failure → `401`
 2. Return `200` immediately; process in `BackgroundTasks`
 3. Parse Chatwoot `created_at` → `sent_at` (customer send time for debounce)
-4. **Inbound debounce** (when `DEBOUNCE_WINDOW_SECONDS > 0`): buffer rapid messages per conversation, flush after cadence window elapses; coalesced content processed as one turn. Human takeover cancels the buffer.
-5. **Per-conversation lock** serializes `_process_inbound` to prevent race conditions on burst messages
-6. Dedupe on `chatwoot_message_id`
-7. Upsert conversation on first sight (moved to flush path for debounced inbound)
-8. **Testing gate**: silently ignore non-allowlisted phones when testing mode is on
+4. **Inbound debounce** (when `DEBOUNCE_WINDOW_SECONDS > 0`): buffer rapid messages per conversation, flush after cadence window elapses; coalesced content processed as one turn. **Chatwoot automation** outbound does not stop the bot. **Human agent** takeover persists buffered inbound then stops processing (spec 031 F2).
+5. **First-sight backfill** — on first processed inbound for a conversation, sync Chatwoot transcript; abstain InfoGatherer if prior messages existed (`prior_history`).
+6. **Per-conversation lock** serializes `_process_inbound` to prevent race conditions on burst messages
+7. Dedupe on `chatwoot_message_id`
+8. Upsert conversation on flush for debounced inbound
+9. **Testing gate**: allowlist (`TESTING_LIMITATIONS_MODE`) or live-testing cap (`LIVE_TESTING_MODE`)
 
 **Event: `message_created`**
 
@@ -976,9 +990,9 @@ conversations → messages, rec_engine_logs, tag_assigner_runs, tag_assigner_que
 
 ## Migrations
 
-Migrations live in `migrations/` (001–021). **There is no automated migration runner** — apply manually via the Supabase SQL editor. Write migrations idempotently (`IF NOT EXISTS`) where possible.
+Migrations live in `migrations/` (001–031, plus operational sync scripts such as `002_hau_final_review_sync.sql`). **There is no automated migration runner** — apply manually via the Supabase SQL editor. Write migrations idempotently (`IF NOT EXISTS`) where possible.
 
-**Recommended apply order:** 001 → 021 sequentially. Migrations 016–021 were added after the original 001–014 sequence; do not skip them on production.
+**Recommended apply order:** 001 → 031 sequentially (022+ include TagAssigner sweep trigger, alias hygiene, InfoGatherer live-test columns, RecEngine multi-hotel). Do not skip 017–020 on production.
 
 | # | File | Changes |
 |---|------|---------|
@@ -1005,6 +1019,12 @@ Migrations live in `migrations/` (001–021). **There is no automated migration 
 | 019 | `019_ilgili_otel_set_by_infogatherer.sql` | InfoGatherer `ilgili_otel_set_by` companion wiring |
 | 020 | `020_messages_sent_at.sql` | `messages.sent_at` for debounce cadence |
 | 021 | `021_coverage_no_reanchor.sql` | Coverage divergence copy without university re-ask |
+| 022–025 | (various) | Sweep trigger, capa/tip mapping, etc. |
+| 026–029 | alias / campus hygiene | TagAssigner university capture seeds and fixes |
+| 030 | `030_infogatherer_live_test_readiness.sql` | Backfill / abstain columns, automation-related schema |
+| 031 | `031_rec_engine_hotel_recs.sql` | Multi-hotel RecEngine support |
+
+See individual files under `migrations/` for exact DDL. Ops data sync: `002_hau_final_review_sync.sql` (HAu trim, not a numbered schema migration).
 
 ### External seed files (referenced, may not be in repo)
 
@@ -1113,7 +1133,7 @@ Auth: `api_access_token: CHATWOOT_API_TOKEN`, 10s timeout.
 
 ## Testing
 
-### Test suite (261 tests, `pytest`)
+### Test suite (505+ tests, `pytest`)
 
 | File | Covers |
 |------|--------|
@@ -1123,7 +1143,10 @@ Auth: `api_access_token: CHATWOOT_API_TOKEN`, 10s timeout.
 | `tests/test_divergence_classifier.py` | Divergence intent classifier parsing |
 | `tests/test_divergence_router.py` | Divergence routing table lookup |
 | `tests/test_divergence_persistence.py` | Same-intent repeat counter behavior |
-| `tests/test_debounce.py` | Inbound debounce, sent_at parsing, processing locks |
+| `tests/test_debounce.py` | Inbound debounce (timer flush path), sent_at parsing, processing locks |
+| `tests/test_infogatherer_first_sight.py` | First-sight backfill abstain |
+| `tests/test_automation_gate.py` | Chatwoot automation template detection |
+| `tests/test_info_gatherer_automation_hangi.py` | Automation + hangi flow |
 | `tests/test_info_gatherer.py` | Extraction helpers (`_extract_university_candidate`, gender regex) |
 | `tests/test_info_gatherer_handlers.py` | Invalid-input handlers, divergence wiring, question-form guard |
 | `tests/test_rec_engine.py` | RecEngine hotel selection |
@@ -1252,7 +1275,10 @@ See [`docs/v1-audit.md`](docs/v1-audit.md) for the full audit. Summary before tu
 - [x] Divergence recovery — price/location/payment/coverage mid-flow (migration 018, Suite D-FIX2 passed)
 - [x] Inbound debounce anchored to Chatwoot `sent_at` (migration 020)
 - [x] TagAssigner attribute merger + info-check (spec 018, code complete)
-- [x] Unit test suite (261 tests passing locally)
+- [x] Unit test suite (505+ tests passing locally)
+- [x] TagAssigner university capture optimization + sweep200 accuracy baseline
+- [x] InfoGatherer live-test readiness (spec 031) + debounce flush fix
+- [x] Live trace diagnostics for webhook debugging
 
 ### Must complete before production
 
@@ -1331,8 +1357,8 @@ See O3/O4 notes in [`docs/wa_test_off_script_detection.md`](docs/wa_test_off_scr
 
 | Gap | Detail |
 |-----|--------|
-| No CI | pytest exists (261 tests) but nothing runs on push/PR |
-| Migrations 017–021 on prod | Code assumes divergence columns + `sent_at`; verify before go-live |
+| No CI | pytest exists (505+ tests) but nothing runs on push/PR |
+| Migrations 017–031 on prod | Code assumes divergence, debounce, abstain, multi-hotel; verify before go-live |
 | In-memory feedback-loop guard | `_recent_self_writes` breaks with multiple Railway replicas |
 | localhost internal HTTP | RecEngine callbacks via `http://localhost:{PORT}` — fragile multi-dyno |
 | Full-table loads per message | `get_all_hotels()`, `get_all_universities()`, … — needs caching at scale |
@@ -1366,6 +1392,9 @@ Resolves via Tier-2 alias in `match_university()` (direct from `awaiting_univers
 | [`docs/020_1_final_preship_fixes_spec.md`](docs/020_1_final_preship_fixes_spec.md) | Pre-ship matching/divergence fixes (implemented) |
 | [`docs/suite_D_FIX2_verification.md`](docs/suite_D_FIX2_verification.md) | Live verification checklist for divergence (passed) |
 | [`docs/suite_D_divergence_live_tests.md`](docs/suite_D_divergence_live_tests.md) | Full Suite D divergence live test matrix |
+| [`docs/031_infogatherer_live_test_readiness_spec.md`](docs/031_infogatherer_live_test_readiness_spec.md) | Automation gate, backfill abstain, debounce F2 |
+| [`docs/live_trace_diagnostics.md`](docs/live_trace_diagnostics.md) | Live trace UI and JSONL |
+| [`docs/029_tagassigner_accuracy_optimization_spec.md`](docs/029_tagassigner_accuracy_optimization_spec.md) | TagAssigner accuracy sweep methodology |
 | [`docs/wa_test_off_script_detection.md`](docs/wa_test_off_script_detection.md) | WhatsApp O1–O10 (legacy answer-classifier era) |
 | [`docs/test_plan_flags_1_and_2.md`](docs/test_plan_flags_1_and_2.md) | Suite A/B/F definitions and exit criteria |
 | [`docs/test-and-fix-1.md`](docs/test-and-fix-1.md) | Conv-52 root-cause analysis and fix list |
@@ -1381,7 +1410,7 @@ Resolves via Tier-2 alias in `match_university()` (direct from `awaiting_univers
 When making changes:
 
 1. Read the relevant spec in `docs/` before modifying layer logic
-2. Run `pytest` before opening a PR (261 tests)
+2. Run `pytest` before opening a PR (505+ tests)
 3. For InfoGatherer/RecEngine changes: re-run conv-52 smoke + relevant F-suite / Suite D cases
 4. For divergence changes: run `tests/test_divergence_*.py`, `tests/test_debounce.py`, and Suite D-FIX2 live checklist
 5. For schema changes, add a new numbered migration file — do not edit applied migrations

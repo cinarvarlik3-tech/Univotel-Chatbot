@@ -13,16 +13,26 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.chatwoot_client import fetch_all_messages
 from app.config import settings
 from app.db import queries
+from app.layers.automation_gate import is_automation_message
 
 logger = logging.getLogger(__name__)
 
 _SKIP_MESSAGE_TYPES = frozenset({2})
+
+
+@dataclass(frozen=True)
+class BackfillResult:
+    """Outcome of a Chatwoot transcript backfill (Spec 031 C4)."""
+
+    ok: bool
+    inserted: int
 
 
 def _parse_chatwoot_timestamp(raw: Any) -> Optional[datetime]:
@@ -71,6 +81,10 @@ def _resolve_sender_type(
     if local_message_type == "inbound":
         return "contact", sender_id, sender_name
 
+    content = raw.get("content")
+    if is_automation_message(content if isinstance(content, str) else None):
+        return "automation", sender_id, sender_name
+
     if sender_id and str(sender_id) == str(settings.chatwoot_bot_agent_id):
         return "infoGatherer", sender_id, sender_name
     return "user", sender_id, sender_name
@@ -79,11 +93,10 @@ def _resolve_sender_type(
 async def backfill_conversation_messages(
     conversation_id: uuid.UUID,
     chatwoot_conversation_id: int,
-) -> int:
+) -> BackfillResult:
     """
     Fetch all Chatwoot messages and upsert missing ones into `messages`.
-    Returns the number of newly inserted rows (0 if already complete).
-    Best-effort: logs and returns 0 on Chatwoot fetch failure (never blocks a run).
+    Returns ok=False when Chatwoot fetch fails (Spec 031 fail-closed for InfoGatherer).
     """
     raw_messages = await fetch_all_messages(chatwoot_conversation_id)
     if raw_messages is None:
@@ -91,7 +104,7 @@ async def backfill_conversation_messages(
             "context_backfill: Chatwoot fetch failed for conversation %s (cwid=%d)",
             conversation_id, chatwoot_conversation_id,
         )
-        return 0
+        return BackfillResult(ok=False, inserted=0)
 
     inserted = 0
     for raw in raw_messages:
@@ -129,4 +142,4 @@ async def backfill_conversation_messages(
         )
         inserted += 1
 
-    return inserted
+    return BackfillResult(ok=True, inserted=inserted)

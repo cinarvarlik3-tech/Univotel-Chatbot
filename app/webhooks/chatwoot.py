@@ -22,6 +22,9 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.db import queries
+from app.db.models import ChatbotLog, Conversation
+from app.diagnostics.trace import trace_event_async
+from app.layers.automation_gate import is_automation_message
 from app.security import verify_chatwoot_hmac
 
 logger = logging.getLogger(__name__)
@@ -157,23 +160,174 @@ def _compute_flush_wait(
     return max(_MIN_FLUSH_DELAY, window - elapsed)
 
 
-def _cancel_debounce(chatwoot_conversation_id: int) -> None:
-    """Discard a pending debounce buffer (human takeover or terminal flush)."""
+def _pop_debounce_state(chatwoot_conversation_id: int) -> _DebounceState | None:
+    """
+    Remove and return a pending debounce buffer.
+
+    Cancels the timer only when the caller is a *different* task. Flush runs on
+    the timer task itself (`_timer` → `_flush_debounce` → here); cancelling that
+    task mid-flush aborts `_process_inbound` with a silent CancelledError.
+    """
     state = _debounce_buffers.pop(chatwoot_conversation_id, None)
     if state and state.task and not state.task.done():
-        state.task.cancel()
+        if state.task is not asyncio.current_task():
+            state.task.cancel()
+    return state
+
+
+def _cancel_debounce(chatwoot_conversation_id: int) -> None:
+    """Discard a pending debounce buffer without persisting (Spec 031 F2 uses persist path)."""
+    _pop_debounce_state(chatwoot_conversation_id)
+
+
+async def _persist_inbound_fragments(
+    *,
+    chatwoot_conversation_id: int,
+    contact_phone: str | None,
+    fragments: list[_DebounceFragment],
+) -> Conversation:
+    """Upsert conversation and persist buffered inbound rows only (no InfoGatherer turn)."""
+    conversation = await queries.upsert_conversation(chatwoot_conversation_id, contact_phone)
+    for fragment in fragments:
+        if fragment.chatwoot_message_id is not None:
+            await queries.insert_message(
+                conversation.id,
+                fragment.chatwoot_message_id,
+                fragment.content,
+                "inbound",
+                "contact",
+                fragment.sender_id,
+                fragment.sender_name,
+                is_private=False,
+                sent_at=fragment.sent_at,
+            )
+    return conversation
+
+
+async def _persist_pending_debounce(chatwoot_conversation_id: int) -> None:
+    """Persist in-flight debounced inbound before human takeover stops the bot (Spec 031 F2)."""
+    state = _pop_debounce_state(chatwoot_conversation_id)
+    if not state or not state.fragments:
+        return
+    await _persist_inbound_fragments(
+        chatwoot_conversation_id=chatwoot_conversation_id,
+        contact_phone=state.contact_phone,
+        fragments=list(state.fragments),
+    )
 
 
 async def _flush_debounce(chatwoot_conversation_id: int) -> None:
-    """Process coalesced inbound content after the debounce window expires."""
-    state = _debounce_buffers.pop(chatwoot_conversation_id, None)
+    """
+    Process coalesced inbound content after the debounce window expires.
+
+    Must not cancel the current task when popping — production flush runs on the
+    debounce timer task (see `_pop_debounce_state`).
+    """
+    await trace_event_async(
+        "debounce",
+        "flush_start",
+        chatwoot_conversation_id=chatwoot_conversation_id,
+    )
+    state = _pop_debounce_state(chatwoot_conversation_id)
     if not state or not state.fragments:
+        await trace_event_async(
+            "debounce",
+            "flush_empty",
+            chatwoot_conversation_id=chatwoot_conversation_id,
+        )
         return
     await _process_inbound(
         chatwoot_conversation_id=chatwoot_conversation_id,
         contact_phone=state.contact_phone,
         fragments=list(state.fragments),
     )
+
+
+async def _log_infogatherer_abstain(
+    conversation_id,
+    *,
+    reason: str,
+    internal_class: str,
+    log_level: str,
+    explanation: str,
+) -> None:
+    await queries.set_infogatherer_abstain(conversation_id, reason)
+    await queries.write_log(
+        ChatbotLog(
+            conversation_id=conversation_id,
+            operation_layer="infoGatherer",
+            which_run="contextRun",
+            log_level=log_level,
+            is_success=False,
+            internal_class=internal_class,
+            explanation=explanation,
+        )
+    )
+
+
+async def _maybe_abstain_after_first_sight_backfill(
+    conversation,
+    chatwoot_conversation_id: int,
+) -> tuple[bool, Conversation]:
+    """
+    Run Chatwoot history backfill once per conversation. Returns (should_process, conversation).
+    """
+    from app.tagassigner.context_backfill import backfill_conversation_messages
+
+    if conversation.history_backfilled_at is not None:
+        return True, conversation
+
+    result = await backfill_conversation_messages(conversation.id, chatwoot_conversation_id)
+    await queries.mark_conversation_history_backfilled(conversation.id)
+
+    if result.ok and result.inserted == 0:
+        await trace_event_async(
+            "webhook",
+            "backfill_fresh_thread",
+            chatwoot_conversation_id=chatwoot_conversation_id,
+            conversation_id=conversation.id,
+        )
+        refreshed = await queries.get_conversation_by_id(conversation.id)
+        return True, refreshed or conversation
+
+    if result.ok and result.inserted > 0:
+        await trace_event_async(
+            "webhook",
+            "abstain_prior_history",
+            level="warn",
+            chatwoot_conversation_id=chatwoot_conversation_id,
+            conversation_id=conversation.id,
+            inserted=result.inserted,
+        )
+        await _log_infogatherer_abstain(
+            conversation.id,
+            reason="prior_history",
+            internal_class="abstain_prior_history",
+            log_level="info",
+            explanation=(
+                f"InfoGatherer abstained: {result.inserted} prior Chatwoot message(s) backfilled"
+            ),
+        )
+        logger.info(
+            "WEBHOOK: abstain_prior_history conversation=%s inserted=%d",
+            conversation.id,
+            result.inserted,
+        )
+        return False, conversation
+
+    await _log_infogatherer_abstain(
+        conversation.id,
+        reason="backfill_failed",
+        internal_class="abstain_backfill_failed",
+        log_level="error",
+        explanation="InfoGatherer abstained: Chatwoot transcript fetch failed",
+    )
+    logger.error(
+        "WEBHOOK: abstain_backfill_failed conversation=%s cwid=%s",
+        conversation.id,
+        chatwoot_conversation_id,
+    )
+    return False, conversation
 
 
 async def _enqueue_debounced_inbound(
@@ -197,6 +351,12 @@ async def _enqueue_debounced_inbound(
 
     window = settings.debounce_window_seconds
     if window <= 0:
+        await trace_event_async(
+            "debounce",
+            "inbound_immediate",
+            chatwoot_conversation_id=chatwoot_conversation_id,
+            message_id=chatwoot_message_id,
+        )
         await _process_inbound(
             chatwoot_conversation_id=chatwoot_conversation_id,
             contact_phone=contact_phone,
@@ -222,6 +382,16 @@ async def _enqueue_debounced_inbound(
     # when per-message processing is slow. A floor keeps a grace period for late
     # siblings and bounds how quickly we respond after the last message.
     wait = _compute_flush_wait(sent_at, float(window))
+
+    await trace_event_async(
+        "debounce",
+        "inbound_buffered",
+        chatwoot_conversation_id=chatwoot_conversation_id,
+        fragment_count=len(state.fragments),
+        flush_wait_sec=round(wait, 3),
+        message_id=chatwoot_message_id,
+        content_preview=(content or "")[:120],
+    )
 
     async def _timer() -> None:
         try:
@@ -421,6 +591,12 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(status_code=200, content={"status": "dropped_no_conversation_id"})
 
     if await _is_live_testing_new_conversation_rejected(chatwoot_conversation_id):
+        await trace_event_async(
+            "webhook",
+            "live_testing_limit_reject",
+            level="warn",
+            chatwoot_conversation_id=chatwoot_conversation_id,
+        )
         return JSONResponse(status_code=200, content={"status": "live_testing_limit_reached"})
 
     message_payload = payload.get("message") or payload
@@ -439,8 +615,26 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks):
     else:
         our_message_type = "inbound"
 
+    await trace_event_async(
+        "webhook",
+        "message_created",
+        chatwoot_conversation_id=chatwoot_conversation_id,
+        chatwoot_event=event,
+        private=is_private,
+        direction=our_message_type,
+        sender_id=sender_id,
+        message_id=chatwoot_message_id,
+        content_preview=(content or "")[:160],
+    )
+
     if chatwoot_message_id and await queries.message_exists(chatwoot_message_id):
         logger.info("WEBHOOK: duplicate message_id=%s — no-op", chatwoot_message_id)
+        await trace_event_async(
+            "webhook",
+            "duplicate_message",
+            chatwoot_conversation_id=chatwoot_conversation_id,
+            message_id=chatwoot_message_id,
+        )
         return JSONResponse(status_code=200, content={"status": "duplicate"})
 
     raw_phone = (
@@ -497,17 +691,55 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks):
                 return JSONResponse(status_code=200, content={"status": "ok"})
 
         if our_message_type == "outbound":
+            if is_automation_message(content):
+                logger.info(
+                    "WEBHOOK: Chatwoot automation outbound on conversation %s — not takeover",
+                    conversation.id,
+                )
+                await trace_event_async(
+                    "webhook",
+                    "outbound_automation",
+                    chatwoot_conversation_id=chatwoot_conversation_id,
+                    conversation_id=conversation.id,
+                    sender_id=sender_id,
+                )
+                if chatwoot_message_id:
+                    await queries.insert_message(
+                        conversation.id, chatwoot_message_id, content,
+                        our_message_type, "automation", sender_id, sender_name, sent_at=sent_at,
+                    )
+                return JSONResponse(status_code=200, content={"status": "ok"})
+
             is_bot = sender_id and str(sender_id) == str(settings.chatwoot_bot_agent_id)
             if not is_bot:
                 logger.info(
                     "WEBHOOK: human agent takeover on conversation %s (sender_id=%s)",
                     conversation.id, sender_id,
                 )
+                await trace_event_async(
+                    "webhook",
+                    "human_takeover",
+                    level="warn",
+                    chatwoot_conversation_id=chatwoot_conversation_id,
+                    conversation_id=conversation.id,
+                    sender_id=sender_id,
+                    sender_name=sender_name,
+                    content_preview=(content or "")[:120],
+                )
+                await _persist_pending_debounce(chatwoot_conversation_id)
                 await queries.set_conversation_stopped(conversation.id)
-                _cancel_debounce(chatwoot_conversation_id)
                 sender_type_val = "user"
                 if chatwoot_message_id and not await queries.conversation_has_messages(conversation.id):
-                    await queries.set_conversation_bot_enabled(conversation.id, False)
+                    await queries.set_infogatherer_abstain(
+                        conversation.id, "outbound_first", bot_enabled=False
+                    )
+                    await trace_event_async(
+                        "webhook",
+                        "outbound_first_abstain",
+                        level="warn",
+                        chatwoot_conversation_id=chatwoot_conversation_id,
+                        conversation_id=conversation.id,
+                    )
             else:
                 sender_type_val = "infoGatherer"
 
@@ -539,6 +771,13 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks):
         sender_id=sender_id,
         sender_name=sender_name,
     )
+    await trace_event_async(
+        "webhook",
+        "inbound_scheduled_debounce",
+        chatwoot_conversation_id=chatwoot_conversation_id,
+        message_id=chatwoot_message_id,
+        debounce_sec=settings.debounce_window_seconds,
+    )
 
     return JSONResponse(status_code=200, content={"status": "ok"})
 
@@ -560,21 +799,33 @@ async def _process_inbound(
         return
 
     async with _get_processing_lock(chatwoot_conversation_id):
-        conversation = await queries.upsert_conversation(chatwoot_conversation_id, contact_phone)
+        await trace_event_async(
+            "webhook",
+            "process_inbound_start",
+            chatwoot_conversation_id=chatwoot_conversation_id,
+            fragment_count=len(fragments),
+        )
+        conversation = await _persist_inbound_fragments(
+            chatwoot_conversation_id=chatwoot_conversation_id,
+            contact_phone=contact_phone,
+            fragments=fragments,
+        )
 
-        for fragment in fragments:
-            if fragment.chatwoot_message_id is not None:
-                await queries.insert_message(
-                    conversation.id,
-                    fragment.chatwoot_message_id,
-                    fragment.content,
-                    "inbound",
-                    "contact",
-                    fragment.sender_id,
-                    fragment.sender_name,
-                    is_private=False,
-                    sent_at=fragment.sent_at,
-                )
+        should_process, conversation = await _maybe_abstain_after_first_sight_backfill(
+            conversation, chatwoot_conversation_id
+        )
+        if not should_process:
+            await trace_event_async(
+                "webhook",
+                "process_inbound_skipped",
+                level="warn",
+                chatwoot_conversation_id=chatwoot_conversation_id,
+                conversation_id=conversation.id,
+                reason=conversation.infogatherer_abstain_reason,
+                bot_enabled=conversation.bot_enabled,
+                flow_state=conversation.flow_state,
+            )
+            return
 
         combined = "\n".join(f.content for f in fragments)
         # Phrase-gate first-message detection keys on the earliest message id, so
@@ -583,13 +834,36 @@ async def _process_inbound(
         first_message_id = min(ids) if ids else None
 
         try:
+            await trace_event_async(
+                "infoGatherer",
+                "process_message_start",
+                chatwoot_conversation_id=chatwoot_conversation_id,
+                conversation_id=conversation.id,
+                flow_state=conversation.flow_state,
+                bot_enabled=conversation.bot_enabled,
+                content_preview=combined[:200],
+            )
             await process_message(
                 conversation,
                 chatwoot_conversation_id,
                 combined,
                 chatwoot_message_id=first_message_id,
             )
+            await trace_event_async(
+                "infoGatherer",
+                "process_message_done",
+                chatwoot_conversation_id=chatwoot_conversation_id,
+                conversation_id=conversation.id,
+            )
         except Exception as exc:
+            await trace_event_async(
+                "infoGatherer",
+                "process_message_error",
+                level="error",
+                chatwoot_conversation_id=chatwoot_conversation_id,
+                conversation_id=conversation.id,
+                error=str(exc),
+            )
             logger.error(
                 "WEBHOOK bg: unhandled error in process_message for conversation %s: %s",
                 conversation.id, exc,

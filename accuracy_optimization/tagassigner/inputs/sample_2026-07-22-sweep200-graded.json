@@ -1,0 +1,4386 @@
+{
+  "round_id": "2026-07-22-sweep200",
+  "generated_at": "2026-07-22T15:12:42+00:00",
+  "conversations": [
+    {
+      "cw_id": 12,
+      "lead_name": "Doruk Yıldırım",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede"
+        ],
+        "university": "Maltepe Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 78,
+      "lead_name": "Aman",
+      "llm_raw": {
+        "labels": [
+          "kapora-alindi"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "kapora-alindi"
+        ],
+        "university": "Okan Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 79,
+      "lead_name": "Yaren",
+      "llm_raw": {
+        "labels": [
+          "deal_awaiting",
+          "24h_window_warning",
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Göztepe",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "24h_window_warning",
+          "ai",
+          "deal_awaiting",
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Göztepe",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 88,
+      "lead_name": "kahraman",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 102,
+      "lead_name": "Yusuf",
+      "llm_raw": {
+        "labels": [
+          "universitede",
+          "24h_window_warning"
+        ],
+        "university": "Haliç Üniversitesi - Ana Kampüs/5. Levent",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "24h_window_warning",
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 105,
+      "lead_name": "Nisanur",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 112,
+      "lead_name": "can",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "Beykent Üniversitesi - Beylikdüzü",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "deal_awaiting"
+        ],
+        "university": "Beykent Üniversitesi - Beylikdüzü",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 126,
+      "lead_name": "Aziz",
+      "llm_raw": {
+        "labels": [
+          "24h_window_warning",
+          "universitede"
+        ],
+        "university": "bilinmiyor-kampus",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "24h_window_warning",
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 142,
+      "lead_name": "Muhammed Emre Altınöz",
+      "llm_raw": {
+        "labels": [],
+        "university": "Piri Reis Üniversitesi  [tek kampüs]",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "24h_window_warning",
+          "ai"
+        ],
+        "university": "Piri Reis Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 145,
+      "lead_name": "Seyran",
+      "llm_raw": {
+        "labels": [
+          "24h_window_warning",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "24h_window_warning",
+          "ai"
+        ],
+        "university": "Medipol Üniversitesi - Kuzey",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 152,
+      "lead_name": "Kerem~",
+      "llm_raw": {
+        "labels": [
+          "ilgilenmiyor",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "hizmet-veremiyoruz",
+          "ilgilenmiyor"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 163,
+      "lead_name": ".",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 183,
+      "lead_name": "Filiz Ayhan",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 206,
+      "lead_name": "Zeinep Sadirdinovna",
+      "llm_raw": {
+        "labels": [
+          "ilgilenmiyor",
+          "universitede"
+        ],
+        "university": "Fatih Sultan Mehmet - Haliç",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "Çift Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "ilgilenmiyor",
+          "universitede"
+        ],
+        "university": "Fatih Sultan Mehmet - Beyoğlu",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Çift Kişilik"
+      }
+    },
+    {
+      "cw_id": 207,
+      "lead_name": "Elif",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Sağlık Bilimleri Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede"
+        ],
+        "university": "Sağlık Bilimleri Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 217,
+      "lead_name": "Hana",
+      "llm_raw": {
+        "labels": [
+          "24h_window_warning",
+          "universitede"
+        ],
+        "university": "Bahçeşehir Üniversitesi - Kuzey",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "24h_window_warning",
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 226,
+      "lead_name": "Şeyda",
+      "llm_raw": {
+        "labels": [
+          "24h_window_warning",
+          "universitede"
+        ],
+        "university": "Sağlık Bilimleri Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "24h_window_warning",
+          "ai",
+          "universitede"
+        ],
+        "university": "Sağlık Bilimleri Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 233,
+      "lead_name": "nur",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Sağlık Bilimleri Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede"
+        ],
+        "university": "Sağlık Bilimleri Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 249,
+      "lead_name": "CŞ",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "Okan Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 261,
+      "lead_name": "B",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 267,
+      "lead_name": "Öykü Nil",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Medeniyet Üniversitesi - Ünalan/Göztepe",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Boğaziçi - Ana Kampüs",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 270,
+      "lead_name": "Nuran",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Kültür Üniversitesi",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede"
+        ],
+        "university": "Kent Üniversitesi - Taksim",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 274,
+      "lead_name": "şevval",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Sağlık Bilimleri Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Sağlık Bilimleri Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 279,
+      "lead_name": "Symbat",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "1+1",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "1+1"
+      }
+    },
+    {
+      "cw_id": 291,
+      "lead_name": "Berrak Günçe",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 306,
+      "lead_name": "zeynep",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "YTÜ - Beşiktaş",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 313,
+      "lead_name": "Esin Azime Soylu",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Maltepe",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Maltepe",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 333,
+      "lead_name": "Nehir",
+      "llm_raw": {
+        "labels": [
+          "universitede",
+          "veli"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede",
+          "veli"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 334,
+      "lead_name": "Melis",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 347,
+      "lead_name": ".",
+      "llm_raw": {
+        "labels": [
+          "veli"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "Beş Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "veli"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Kız",
+        "oda_tiipi": "Beş Kişilik"
+      }
+    },
+    {
+      "cw_id": 355,
+      "lead_name": "Ferit",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İstanbul Teknik Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "1+1",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "1+1"
+      }
+    },
+    {
+      "cw_id": 357,
+      "lead_name": "Iris 🤍",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 372,
+      "lead_name": "Mübeccel",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "İstanbul Üniversitesi Cerrahpaşa",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "İstanbul Üniversitesi Cerrahpaşa",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 380,
+      "lead_name": "HasretCan Görür",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "ogrenci-degil",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 384,
+      "lead_name": "Doğukan Koçak",
+      "llm_raw": {
+        "labels": [],
+        "university": "Medipol Üniversitesi - Kuzey",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "Çift Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "Medipol Üniversitesi - Kuzey",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Çift Kişilik"
+      }
+    },
+    {
+      "cw_id": 385,
+      "lead_name": "Efe Halil Kanık",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 393,
+      "lead_name": "Muhammet Emin GÖKSU",
+      "llm_raw": {
+        "labels": [
+          "ogrenci-degil"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "1+1",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci-degil"
+        ],
+        "university": "İstanbul Aydın Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "1+1"
+      }
+    },
+    {
+      "cw_id": 418,
+      "lead_name": "Parmida",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 419,
+      "lead_name": "Nazenin Karademir",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Maltepe",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Maltepe Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 433,
+      "lead_name": "Gökhan",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "MSGSÜ - Beşiktaş",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 455,
+      "lead_name": "Elshad Isgandarli",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "Çift Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Çift Kişilik"
+      }
+    },
+    {
+      "cw_id": 459,
+      "lead_name": "Yusuf Çalbay",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "Üsküdar Üniversitesi",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 465,
+      "lead_name": "Civan",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Göztepe",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 471,
+      "lead_name": "Sümeyra",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Nişantaşı Üniversitesi - Maslak 1453",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Nişantaşı Üniversitesi - Maslak 1453",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 473,
+      "lead_name": "Mali",
+      "llm_raw": {
+        "labels": [
+          "ogrenci_cinsiyet"
+        ],
+        "university": "İTÜ - Ayazağa",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 475,
+      "lead_name": "Tuana",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Medipol Üniversitesi - Kuzey",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Medipol Üniversitesi - Kuzey",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 478,
+      "lead_name": "Dr.Polat Aruser",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz",
+          "universitede"
+        ],
+        "university": "Üsküdar Üniversitesi",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 495,
+      "lead_name": "B",
+      "llm_raw": {
+        "labels": [
+          "ogrenci_cinsiyet",
+          "universitede"
+        ],
+        "university": "Topkapı Üniversitesi - Kazlıçeşme",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Topkapı Üniversitesi - Kazlıçeşme",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 508,
+      "lead_name": "Berrin",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "İKÜ",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "Kent Üniversitesi - Taksim",
+        "gender": "Erkek",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 509,
+      "lead_name": "Barış",
+      "llm_raw": {
+        "labels": [
+          "ogrenci-degil"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci-degil"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 511,
+      "lead_name": "Emre",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 514,
+      "lead_name": "ipek nisa",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 515,
+      "lead_name": "Furkan ERGÚL",
+      "llm_raw": {
+        "labels": [
+          "ogrenci_cinsiyet",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 516,
+      "lead_name": "Şule Çelik",
+      "llm_raw": {
+        "labels": [
+          "ogrenci-degil"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "ogrenci-degil"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 519,
+      "lead_name": "Kadir👀",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 527,
+      "lead_name": "Can Kızıltan",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 541,
+      "lead_name": "efe aydın",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 544,
+      "lead_name": "Buğra Gürpınar",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "deal_awaiting"
+        ],
+        "university": "Beykent Üniversitesi - Beylikdüzü",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 550,
+      "lead_name": "hatemcharrad4",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 562,
+      "lead_name": "Murat Cinar",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 572,
+      "lead_name": "♡♡",
+      "llm_raw": {
+        "labels": [
+          "ogrenci-degil"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci-degil"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 575,
+      "lead_name": "Enda Ceren İn",
+      "llm_raw": {
+        "labels": [
+          "kız",
+          "universitede"
+        ],
+        "university": "Kent Üniversitesi - Taksim",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede"
+        ],
+        "university": "Okan Üniversitesi",
+        "gender": "Kız",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 579,
+      "lead_name": "Hilal🌜",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 582,
+      "lead_name": "Samet",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz",
+          "universitede"
+        ],
+        "university": "Koç Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Koç Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 583,
+      "lead_name": "𝓒𝓲𝓱𝓪𝓷𝓰𝓲𝓻 𝓑𝓮𝓻𝓪",
+      "llm_raw": {
+        "labels": [
+          "universitede",
+          "ogrenci"
+        ],
+        "university": "29 Mayıs Üniversitesi",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "deal_awaiting",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "29 Mayıs Üniversitesi",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 589,
+      "lead_name": "ErenSylmz",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 590,
+      "lead_name": "arda",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Göztepe",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 593,
+      "lead_name": "Erdem",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 601,
+      "lead_name": "Ufuk Kafalı",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Koç Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Koç Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 603,
+      "lead_name": "Amil",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 644,
+      "lead_name": "Darın",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Beykoz Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Beykoz Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 646,
+      "lead_name": "Yusuf",
+      "llm_raw": {
+        "labels": [
+          "Erkek",
+          "universitede"
+        ],
+        "university": "29 Mayıs Üniversitesi",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "deal_awaiting",
+          "universitede"
+        ],
+        "university": "29 Mayıs Üniversitesi",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 651,
+      "lead_name": "Bade Su Karakuş",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 668,
+      "lead_name": "sucan28@hotmail.com",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "İstanbul Üniversitesi Cerrahpaşa",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 670,
+      "lead_name": "Av Tulay Ozenc",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Nişantaşı Üniversitesi - Maslak 1453",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede"
+        ],
+        "university": "Nişantaşı Üniversitesi - Maslak 1453",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 671,
+      "lead_name": "Filiz M.",
+      "llm_raw": {
+        "labels": [
+          "univotelli",
+          "ilgilenmiyor"
+        ],
+        "university": "Yıldız Teknik Üniversitesi - Davutpaşa",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "Çift Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ilgilenmiyor",
+          "univotelli"
+        ],
+        "university": "Okan Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Çift Kişilik"
+      }
+    },
+    {
+      "cw_id": 673,
+      "lead_name": "Süreyya Polat",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Boğaziçi - Ana Kampüs",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Boğaziçi - Ana Kampüs",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 679,
+      "lead_name": "Sinem Özdemir",
+      "llm_raw": {
+        "labels": [
+          "universitede",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "Gelişim Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "deal_awaiting",
+          "universitede"
+        ],
+        "university": "Gelişim Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 682,
+      "lead_name": "Oğuz",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İTÜ - Ayazağa",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "İTÜ - Ayazağa",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 688,
+      "lead_name": "Son Parfüm Bükücü",
+      "llm_raw": {
+        "labels": [
+          "ogrenci-degil"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci-degil"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 708,
+      "lead_name": "Türkan Kurucuova",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 710,
+      "lead_name": "Kemal Alp",
+      "llm_raw": {
+        "labels": [
+          "universitede",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Okan Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 711,
+      "lead_name": "Çiϲ̧ek",
+      "llm_raw": {
+        "labels": [
+          "kız",
+          "yerlesti"
+        ],
+        "university": "Acıbadem Üniversitesi",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "yerlesti"
+        ],
+        "university": "Acıbadem Üniversitesi",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 724,
+      "lead_name": "Elif Catar",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İstanbul Sağlık ve Teknoloji Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "İstanbul Sağlık ve Teknoloji Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 727,
+      "lead_name": "Eray Güneş",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 729,
+      "lead_name": "Mestas",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 731,
+      "lead_name": "مريم✨️🌸",
+      "llm_raw": {
+        "labels": [
+          "universitede",
+          "veli",
+          "ziyaret"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede",
+          "veli",
+          "ziyaret"
+        ],
+        "university": "Okan Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 745,
+      "lead_name": "Zai",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Kültür Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 751,
+      "lead_name": "Serkan Kemik",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 760,
+      "lead_name": "Ecrin",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "kız",
+          "universitede"
+        ],
+        "university": "İTÜ - Ayazağa",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "İTÜ - Ayazağa",
+        "gender": "Kız",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 769,
+      "lead_name": "Freunde Trip",
+      "llm_raw": {
+        "labels": [
+          "kız",
+          "universitede"
+        ],
+        "university": "Biruni Üniversitesi",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Biruni Üniversitesi",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 772,
+      "lead_name": "Sami Süner",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İstanbul Üniversitesi Cerrahpaşa",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 776,
+      "lead_name": "Dağıstan Şua",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 790,
+      "lead_name": "Selen",
+      "llm_raw": {
+        "labels": [
+          "kız",
+          "universitede"
+        ],
+        "university": "Nişantaşı Üniversitesi - Maslak 1453",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede"
+        ],
+        "university": "Nişantaşı Üniversitesi - Maslak 1453",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 805,
+      "lead_name": "Figen",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 820,
+      "lead_name": ".",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Galatasaray Üniversitesi  [tek kampüs]",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Galatasaray Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 850,
+      "lead_name": "Nuriye Yücedağ",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "İstanbul Üniversitesi Cerrahpaşa",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci"
+        ],
+        "university": "İstanbul Üniversitesi Cerrahpaşa",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 856,
+      "lead_name": "Jule ASLAN",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "İstanbul Üniversitesi Cerrahpaşa",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "İstanbul Üniversitesi Cerrahpaşa",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 860,
+      "lead_name": "Sibel Akaydın",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Göztepe",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 869,
+      "lead_name": "Esra Şirazi",
+      "llm_raw": {
+        "labels": [
+          "kız",
+          "universitede"
+        ],
+        "university": "Medipol Üniversitesi - Kuzey",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "2+1",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Medipol Üniversitesi - Kuzey",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "2+1"
+      }
+    },
+    {
+      "cw_id": 880,
+      "lead_name": "Sema",
+      "llm_raw": {
+        "labels": [],
+        "university": "Gelişim Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "deal_awaiting",
+          "fiyat-soruyor"
+        ],
+        "university": "Gelişim Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 883,
+      "lead_name": "Berk Tuğra Demir",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Sağlık Bilimleri Üniversitesi",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Sağlık Bilimleri Üniversitesi",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 899,
+      "lead_name": "Gülhan Can Cofcof",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "Çapa Tıp Fakültesi",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "deal_awaiting",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "Cerrahpaşa Tıp Fakültesi",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 901,
+      "lead_name": "Özgür",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 909,
+      "lead_name": "Eyşan Akdağ",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Yeditepe Üniversitesi",
+        "ogrenci_cinsiyet": "Bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Maltepe Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 926,
+      "lead_name": "Ayşe",
+      "llm_raw": {
+        "labels": [
+          "veli",
+          "universitede"
+        ],
+        "university": "YTÜ - Beşiktaş",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede",
+          "veli"
+        ],
+        "university": "YTÜ - Beşiktaş",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 929,
+      "lead_name": "Ayşe",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "İstinye Üniversitesi - Vadi",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "İstinye Üniversitesi - Vadi",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 934,
+      "lead_name": "Mariana",
+      "llm_raw": {
+        "labels": [
+          "ogrenci_cinsiyet"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 935,
+      "lead_name": "dr esenpoyraz",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 940,
+      "lead_name": "Bahar Ferda Topçu",
+      "llm_raw": {
+        "labels": [
+          "universitede",
+          "ogrenci_cinsiyet"
+        ],
+        "university": "Bahçeşehir Üniversitesi - Kuzey",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 943,
+      "lead_name": "Kalender Karataş",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Çapa Tıp Fakültesi",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Çapa Tıp Fakültesi",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 948,
+      "lead_name": "Leyla Şeker",
+      "llm_raw": {
+        "labels": [
+          "ogrenci-degil",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "hizmet-veremiyoruz",
+          "ogrenci-degil"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 955,
+      "lead_name": "Saygıner Demirel",
+      "llm_raw": {
+        "labels": [
+          "universitede",
+          "ogrenci_cinsiyet",
+          "universitede"
+        ],
+        "university": "YTÜ - Davutpaşa",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "YTÜ - Davutpaşa",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 956,
+      "lead_name": "Mürsel",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İstanbul Sağlık ve Teknoloji Üniversitesi",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "İstanbul Sağlık ve Teknoloji Üniversitesi",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 962,
+      "lead_name": "DAKBİLEK",
+      "llm_raw": {
+        "labels": [
+          "veli",
+          "universitede"
+        ],
+        "university": "Özyeğin Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede",
+          "veli"
+        ],
+        "university": "Özyeğin Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 963,
+      "lead_name": "Servet GÜNEY",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İTÜ - Maçka",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "İTÜ - Maçka",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 964,
+      "lead_name": "Leyla Cayircioglu",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 972,
+      "lead_name": "Nazan",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Göztepe",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "Çift Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Göztepe",
+        "gender": "Kız",
+        "oda_tiipi": "Çift Kişilik"
+      }
+    },
+    {
+      "cw_id": 975,
+      "lead_name": "Zeynep Neva Fidan",
+      "llm_raw": {
+        "labels": [
+          "kız"
+        ],
+        "university": "Nişantaşı Üniversitesi - Maslak 1453",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "Nişantaşı Üniversitesi - Maslak 1453",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 983,
+      "lead_name": "Srv",
+      "llm_raw": {
+        "labels": [
+          "kız",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 984,
+      "lead_name": "Ayşe",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "YTÜ - Davutpaşa",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 992,
+      "lead_name": "Nihan",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 993,
+      "lead_name": "Sedef Peker",
+      "llm_raw": {
+        "labels": [
+          "yerlesti",
+          "ogrenci_cinsiyet",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede",
+          "yerlesti"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1001,
+      "lead_name": "MyGzl",
+      "llm_raw": {
+        "labels": [
+          "ogrenci_cinsiyet"
+        ],
+        "university": "bilinmiyor-kampus",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "Medipol Üniversitesi - Kuzey",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1002,
+      "lead_name": "Aynur",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1006,
+      "lead_name": "asude",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1013,
+      "lead_name": "Hülya",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1016,
+      "lead_name": "...",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor-kampus",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1024,
+      "lead_name": "1024",
+      "llm_raw": {
+        "labels": [
+          "kız",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "Çift Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Maltepe Üniversitesi",
+        "gender": "Kız",
+        "oda_tiipi": "Çift Kişilik"
+      }
+    },
+    {
+      "cw_id": 1035,
+      "lead_name": "Süleyman Cansalı",
+      "llm_raw": {
+        "labels": [
+          "ogrenci-degil"
+        ],
+        "university": "İstanbul Sabahattin Zaim Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci-degil"
+        ],
+        "university": "İstanbul Sabahattin Zaim Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1038,
+      "lead_name": "Nuran Seyfioğlu",
+      "llm_raw": {
+        "labels": [
+          "veli"
+        ],
+        "university": "Üsküdar Üniversitesi",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "veli"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1044,
+      "lead_name": "Döner Demirci",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Maltepe",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Maltepe Üniversitesi",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1045,
+      "lead_name": "GÖKÇE Y.",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "İstanbul Aydın Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1047,
+      "lead_name": "Muhammad Akbar Safi",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1058,
+      "lead_name": "Zühre Necla Sakder",
+      "llm_raw": {
+        "labels": [
+          "veli"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "2+1",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "veli"
+        ],
+        "university": "Özyeğin Üniversitesi",
+        "gender": "Kız",
+        "oda_tiipi": "2+1"
+      }
+    },
+    {
+      "cw_id": 1059,
+      "lead_name": "Selda",
+      "llm_raw": {
+        "labels": [
+          "ogrenci"
+        ],
+        "university": "YTÜ - Davutpaşa",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci"
+        ],
+        "university": "YTÜ - Davutpaşa",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1062,
+      "lead_name": "ceci",
+      "llm_raw": {
+        "labels": [
+          "kız",
+          "universitede"
+        ],
+        "university": "İstinye Üniversitesi - Vadi",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede"
+        ],
+        "university": "İstinye Üniversitesi - Vadi",
+        "gender": "Kız",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 1064,
+      "lead_name": "Atilla",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor-kampus",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "Medipol Üniversitesi - Kuzey",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1078,
+      "lead_name": "Yasemin",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1093,
+      "lead_name": "Mehmet Yıldırım",
+      "llm_raw": {
+        "labels": [
+          "universitede",
+          "ogrenci_cinsiyet",
+          "erkek"
+        ],
+        "university": "Boğaziçi - Ana Kampüs",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede"
+        ],
+        "university": "Boğaziçi - Ana Kampüs",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1099,
+      "lead_name": "Sadık",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Acıbadem Üniversitesi",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Acıbadem Üniversitesi",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1102,
+      "lead_name": "Savaş Ada",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İTÜ - Ayazağa",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "İTÜ - Ayazağa",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1105,
+      "lead_name": "Bengü İrem Acar",
+      "llm_raw": {
+        "labels": [
+          "kız",
+          "fiyat-soruyor"
+        ],
+        "university": "Acıbadem Üniversitesi",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "Acıbadem Üniversitesi",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1107,
+      "lead_name": "Nergis Eraşcı",
+      "llm_raw": {
+        "labels": [
+          "ogrenci_cinsiyet"
+        ],
+        "university": "İTÜ - Ayazağa",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "İTÜ - Ayazağa",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1119,
+      "lead_name": "Nihan Türedi",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Bahçeşehir Üniversitesi - Çırağan",
+        "ogrenci_cinsiyet": "Bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1128,
+      "lead_name": "Özlem'in Evleri",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1140,
+      "lead_name": "Deniz",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1148,
+      "lead_name": "sümeyye",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "deal_awaiting"
+        ],
+        "university": "Gelişim Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1155,
+      "lead_name": "Fatih",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İTÜ - Ayazağa",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "İTÜ - Ayazağa",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1160,
+      "lead_name": "Sadat Sherzai",
+      "llm_raw": {
+        "labels": [
+          "ziyaret"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "1+1",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ziyaret"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "1+1"
+      }
+    },
+    {
+      "cw_id": 1162,
+      "lead_name": "İrem Can",
+      "llm_raw": {
+        "labels": [
+          "ziyaret",
+          "ogrenci-degil"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "hizmet-veremiyoruz",
+          "ogrenci-degil",
+          "ziyaret"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Kız",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 1163,
+      "lead_name": "Hüseyin Baki Uğur",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "1+1",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "1+1"
+      }
+    },
+    {
+      "cw_id": 1167,
+      "lead_name": "Hazel Turan",
+      "llm_raw": {
+        "labels": [
+          "universitede",
+          "ziyaret"
+        ],
+        "university": "İstanbul Teknik Üniversitesi",
+        "ogrenci_cinsiyet": "Bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede",
+          "ziyaret"
+        ],
+        "university": "Işık Üniversitesi - Maslak",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1168,
+      "lead_name": "Furkan Aytaş",
+      "llm_raw": {
+        "labels": [
+          "universitede",
+          "univotelli"
+        ],
+        "university": "bilinmiyor-kampus",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "Çift Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede",
+          "univotelli"
+        ],
+        "university": "Okan Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Çift Kişilik"
+      }
+    },
+    {
+      "cw_id": 1169,
+      "lead_name": "Sude",
+      "llm_raw": {
+        "labels": [
+          "kapora-alindi",
+          "universitede"
+        ],
+        "university": "Yeni Yüzyıl Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "2+1",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "kapora-alindi",
+          "universitede"
+        ],
+        "university": "Yeni Yüzyıl Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "2+1"
+      }
+    },
+    {
+      "cw_id": 1175,
+      "lead_name": "deniz",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "veli",
+          "universitede"
+        ],
+        "university": "Gelişim Üniversitesi",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "deal_awaiting",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "Gelişim Üniversitesi",
+        "gender": "Kız",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 1180,
+      "lead_name": "Çınar Acaröz",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1182,
+      "lead_name": "Zeynep Topkaya",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İTÜ - Ayazağa",
+        "ogrenci_cinsiyet": "Bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1185,
+      "lead_name": "habiba",
+      "llm_raw": {
+        "labels": [
+          "ilgilenmiyor"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "ilgilenmiyor"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1187,
+      "lead_name": "Faruk Altın",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1193,
+      "lead_name": "onur berat",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Göztepe",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "2 Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1196,
+      "lead_name": "merve",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "ilgilenmiyor"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ilgilenmiyor",
+          "ogrenci"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1202,
+      "lead_name": "Musab Adabağlı",
+      "llm_raw": {
+        "labels": [
+          "ogrenci_cinsiyet",
+          "universitede",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "Medeniyet Üniversitesi - Göztepe",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "deal_awaiting",
+          "universitede"
+        ],
+        "university": "Medeniyet Üniversitesi - Ünalan/Göztepe",
+        "gender": "Erkek",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 1211,
+      "lead_name": "TS",
+      "llm_raw": {
+        "labels": [],
+        "university": "Yeditepe Üniversitesi",
+        "ogrenci_cinsiyet": "Bilinmiyor",
+        "oda_tiipi": "1 Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1217,
+      "lead_name": "Ali",
+      "llm_raw": {
+        "labels": [
+          "universitede",
+          "ogrenci_cinsiyet"
+        ],
+        "university": "Sağlık Bilimleri Üniversitesi",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "2 Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "Sağlık Bilimleri Üniversitesi",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1226,
+      "lead_name": "Faikhan Fahri Yetişen",
+      "llm_raw": {
+        "labels": [
+          "universitede",
+          "ogrenci_cinsiyet",
+          "ogrenci"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "Biruni Üniversitesi",
+        "gender": "Erkek",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 1227,
+      "lead_name": "Şevval Çetinkaya",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Maltepe",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "2 Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "Maltepe Üniversitesi",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1234,
+      "lead_name": "Sleeping",
+      "llm_raw": {
+        "labels": [
+          "ilgilenmiyor"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "ilgilenmiyor"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 1247,
+      "lead_name": "Bircan Savaş",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "Galatasaray Üniversitesi",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "Galatasaray Üniversitesi",
+        "gender": "Erkek",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 1248,
+      "lead_name": "M. Hüseyin",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Boğaziçi - Ana Kampüs",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Boğaziçi - Ana Kampüs",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1253,
+      "lead_name": "sahar",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Ticaret Üniversitesi - Küçükyalı",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1256,
+      "lead_name": "İrem Sezek",
+      "llm_raw": {
+        "labels": [
+          "ogrenci_cinsiyet",
+          "universitede"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "2 Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1261,
+      "lead_name": "Özgür Alper",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Yeditepe Üniversitesi",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "universitede"
+        ],
+        "university": "Yeditepe Üniversitesi",
+        "gender": "Kız",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 1269,
+      "lead_name": "Can",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "İTÜ - Ayazağa",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "Çift Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "info-check",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "Çift Kişilik"
+      }
+    },
+    {
+      "cw_id": 1270,
+      "lead_name": "Durdane 🏐🏀🎯🏓",
+      "llm_raw": {
+        "labels": [
+          "veli"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "info-check",
+          "veli"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1272,
+      "lead_name": "Aysun",
+      "llm_raw": {
+        "labels": [
+          "veli"
+        ],
+        "university": "Bahçeşehir Üniversitesi - Kuzey",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "veli"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1283,
+      "lead_name": "Ayşe Özkan Darıcı",
+      "llm_raw": {
+        "labels": [
+          "ogrenci_cinsiyet"
+        ],
+        "university": "bilinmiyor-kampus",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "Medipol Üniversitesi - Kuzey",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1287,
+      "lead_name": "ㅤㅤㅤㅤ",
+      "llm_raw": {
+        "labels": [
+          "ogrenci-degil",
+          "Kız"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci-degil"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1288,
+      "lead_name": "Murat Ertan",
+      "llm_raw": {
+        "labels": [
+          "kız",
+          "fiyat-soruyor"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor"
+        ],
+        "university": "İstanbul Aydın Üniversitesi",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1295,
+      "lead_name": "Eray Kalfaoğlu",
+      "llm_raw": {
+        "labels": [
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor",
+          "ogrenci",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Kız",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 1306,
+      "lead_name": "Harika",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Gelişim Üniversitesi  [tek kampüs]",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "deal_awaiting",
+          "fiyat-soruyor",
+          "universitede"
+        ],
+        "university": "Gelişim Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1312,
+      "lead_name": "doğa",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "Maltepe Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1314,
+      "lead_name": "Beren",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Nişantaşı Üniversitesi - Maslak 1453",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "Tek Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Nişantaşı Üniversitesi - Maslak 1453",
+        "gender": "Kız",
+        "oda_tiipi": "Tek Kişilik"
+      }
+    },
+    {
+      "cw_id": 1318,
+      "lead_name": "Zehra Bayraktar",
+      "llm_raw": {
+        "labels": [
+          "veli"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "veli"
+        ],
+        "university": "Maltepe Üniversitesi",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1319,
+      "lead_name": "Zeynep Büyükbıçakcı",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "İstanbul Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1334,
+      "lead_name": ".",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "Beykoz Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1376,
+      "lead_name": "Hamza Temiz",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Bilgi Üniversitesi - Dolapdere",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "info-check",
+          "universitede"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1379,
+      "lead_name": "Alpay Reisoğlu",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "İstanbul Aydın Üniversitesi",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "İstanbul Aydın Üniversitesi",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1381,
+      "lead_name": "Nesrin",
+      "llm_raw": {
+        "labels": [
+          "ogrenci"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "ogrenci"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1413,
+      "lead_name": "İsmail Çankaya",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Nişantaşı Üniversitesi - Maslak 1453",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Nişantaşı Üniversitesi - Maslak 1453",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1423,
+      "lead_name": "Mehmet Sertaç Özcan",
+      "llm_raw": {
+        "labels": [],
+        "university": "Boğaziçi - Anadolu Hisarı",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "Boğaziçi - Ana Kampüs",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1426,
+      "lead_name": "Duygu Turna",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1437,
+      "lead_name": "María José",
+      "llm_raw": {
+        "labels": [],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "Çift Kişilik",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "fiyat-soruyor"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "Çift Kişilik"
+      }
+    },
+    {
+      "cw_id": 1439,
+      "lead_name": "Halit SÜMER",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Maltepe",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Marmara Üniversitesi - Maltepe",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1446,
+      "lead_name": "Merve",
+      "llm_raw": {
+        "labels": [
+          "universitede"
+        ],
+        "university": "Bahçeşehir Üniversitesi - Kuzey",
+        "ogrenci_cinsiyet": "Kız",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "universitede"
+        ],
+        "university": "Boğaziçi - Ana Kampüs",
+        "gender": "Kız",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1463,
+      "lead_name": "Özlem Dinçer",
+      "llm_raw": {
+        "labels": [
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "bilinmiyor",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "hizmet-veremiyoruz"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Bilinmiyor",
+        "oda_tiipi": "boş"
+      }
+    },
+    {
+      "cw_id": 1471,
+      "lead_name": "Türkan",
+      "llm_raw": {
+        "labels": [
+          "veli"
+        ],
+        "university": "bilinmiyor",
+        "ogrenci_cinsiyet": "Erkek",
+        "oda_tiipi": "boş",
+        "university_mention": null
+      },
+      "final": {
+        "labels": [
+          "ai",
+          "veli"
+        ],
+        "university": "bilinmiyor",
+        "gender": "Erkek",
+        "oda_tiipi": "boş"
+      }
+    }
+  ]
+}

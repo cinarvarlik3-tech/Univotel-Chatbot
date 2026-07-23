@@ -35,6 +35,11 @@ SENTINEL_HOTEL_IDS = (
 )
 
 
+def is_recengine_sentinel_hotel_id(hotel_id: uuid.UUID) -> bool:
+    """True for global-null / deal-awaiting placeholder rows — never RecEngine FOUND targets."""
+    return hotel_id in SENTINEL_HOTEL_IDS
+
+
 # ---------------------------------------------------------------------------
 # Conversations
 # ---------------------------------------------------------------------------
@@ -168,6 +173,56 @@ async def set_conversation_bot_enabled(conversation_id: uuid.UUID, enabled: bool
         "UPDATE conversations SET bot_enabled = $2, last_updated_at = now() WHERE id = $1",
         conversation_id, enabled,
     )
+
+
+async def mark_conversation_history_backfilled(conversation_id: uuid.UUID) -> None:
+    """Record that Chatwoot transcript backfill was attempted (Spec 031)."""
+    pool = get_pool()
+    await pool.execute(
+        """
+        UPDATE conversations
+        SET history_backfilled_at = now(), last_updated_at = now()
+        WHERE id = $1
+        """,
+        conversation_id,
+    )
+
+
+async def set_infogatherer_abstain(
+    conversation_id: uuid.UUID,
+    reason: str,
+    *,
+    bot_enabled: bool = False,
+) -> None:
+    """Decline InfoGatherer for this conversation with a persisted reason (Spec 031 D4)."""
+    pool = get_pool()
+    await pool.execute(
+        """
+        UPDATE conversations
+        SET infogatherer_abstain_reason = $2,
+            bot_enabled = $3,
+            last_updated_at = now()
+        WHERE id = $1
+        """,
+        conversation_id, reason, bot_enabled,
+    )
+
+
+async def has_automation_outbound(conversation_id: uuid.UUID) -> bool:
+    """True if any outbound row matches the Chatwoot automation template (Spec 031 C5)."""
+    from app.layers.automation_gate import is_automation_message
+
+    pool = get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT content FROM messages
+        WHERE conversation_id = $1
+          AND message_type = 'outbound'
+          AND is_private = false
+        """,
+        conversation_id,
+    )
+    return any(is_automation_message(row["content"]) for row in rows)
 
 
 async def reset_divergence_persistence(conversation_id: uuid.UUID) -> None:
@@ -1169,15 +1224,19 @@ async def update_rec_engine_log(
     status: str,
     hotel_rec: Optional[uuid.UUID],
     status_code: Optional[str] = None,
+    hotel_recs: Optional[list[uuid.UUID]] = None,
 ) -> None:
     pool = get_pool()
     await pool.execute(
         """
         UPDATE rec_engine_logs
-        SET status = $1, hotel_rec = $2, status_code = $3
-        WHERE idempotency_key = $4
+        SET status = $1,
+            hotel_rec = $2,
+            status_code = $3,
+            hotel_recs = $4
+        WHERE idempotency_key = $5
         """,
-        status, hotel_rec, status_code, idempotency_key,
+        status, hotel_rec, status_code, hotel_recs, idempotency_key,
     )
 
 

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.tagassigner.context_backfill import (
+    BackfillResult,
     _map_message_type,
     backfill_conversation_messages,
 )
@@ -44,9 +45,10 @@ async def test_should_insert_missing_messages_when_local_table_is_partial():
         "app.tagassigner.context_backfill.queries.insert_message",
         new_callable=AsyncMock,
     ) as insert_mock:
-        inserted = await backfill_conversation_messages(conversation_id, 1142)
+        result = await backfill_conversation_messages(conversation_id, 1142)
 
-    assert inserted == 1
+    assert result.ok is True
+    assert result.inserted == 1
     insert_mock.assert_awaited_once()
     assert insert_mock.await_args.kwargs["advance_activity"] is False
 
@@ -79,9 +81,10 @@ async def test_should_skip_private_and_activity_messages():
         "app.tagassigner.context_backfill.queries.insert_message",
         new_callable=AsyncMock,
     ) as insert_mock:
-        inserted = await backfill_conversation_messages(conversation_id, 1)
+        result = await backfill_conversation_messages(conversation_id, 1)
 
-    assert inserted == 1
+    assert result.ok is True
+    assert result.inserted == 1
     assert insert_mock.await_args.args[3] == "inbound"
 
 
@@ -111,8 +114,9 @@ async def test_should_return_zero_when_chatwoot_fetch_fails():
         new_callable=AsyncMock,
         return_value=None,
     ):
-        inserted = await backfill_conversation_messages(uuid.uuid4(), 99)
-    assert inserted == 0
+        result = await backfill_conversation_messages(uuid.uuid4(), 99)
+    assert result.ok is False
+    assert result.inserted == 0
 
 
 @pytest.mark.asyncio
@@ -139,6 +143,7 @@ async def test_should_be_idempotent_when_all_messages_already_present():
         "app.tagassigner.context_backfill.queries.insert_message",
         new_callable=AsyncMock,
     ) as insert_mock:
-        inserted = await backfill_conversation_messages(uuid.uuid4(), 1)
-    assert inserted == 0
+        result = await backfill_conversation_messages(uuid.uuid4(), 1)
+    assert result.ok is True
+    assert result.inserted == 0
     insert_mock.assert_not_awaited()

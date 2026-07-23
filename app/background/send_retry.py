@@ -12,6 +12,8 @@ from typing import Optional
 from app.chatwoot_client import send_message
 from app.config import settings
 
+from app.diagnostics.trace import trace_event_async
+
 logger = logging.getLogger(__name__)
 
 RETRY_DELAYS = [1.0, 2.0, 4.0]
@@ -30,7 +32,22 @@ async def send_with_retry(chatwoot_conversation_id: int, content: str) -> SendRe
             "OUTBOUND_BLOCK: suppressed message to conversation %s",
             chatwoot_conversation_id,
         )
+        await trace_event_async(
+            "chatwoot",
+            "outbound_blocked",
+            level="warn",
+            chatwoot_conversation_id=chatwoot_conversation_id,
+            content_preview=content[:120],
+        )
         return SendRetryResult(ok=True, final_status_code=0)
+
+    await trace_event_async(
+        "chatwoot",
+        "send_attempt",
+        chatwoot_conversation_id=chatwoot_conversation_id,
+        content_preview=content[:200],
+        content_len=len(content),
+    )
 
     last_error: Optional[str] = None
     last_status = 0
@@ -39,6 +56,13 @@ async def send_with_retry(chatwoot_conversation_id: int, content: str) -> SendRe
         result = await send_message(chatwoot_conversation_id, content)
 
         if result.ok:
+            await trace_event_async(
+                "chatwoot",
+                "send_ok",
+                chatwoot_conversation_id=chatwoot_conversation_id,
+                message_id=result.message_id,
+                attempt=attempt,
+            )
             return SendRetryResult(ok=True, final_status_code=result.status_code)
 
         last_status = result.status_code

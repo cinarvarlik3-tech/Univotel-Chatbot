@@ -4,11 +4,13 @@ RecEngine (§5.2, §8.4).
 Entry point: run_rec_engine(conversation_id, idempotency_key)
 Writes a 'processing' row before doing any query work (idempotency guarantee).
 Returns via HTTP callback to /internal/infogatherer/callback on completion.
+
+FOUND returns all eligible properties (gender + university), ordered by priority_score.
 """
 from __future__ import annotations
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
@@ -17,6 +19,7 @@ import httpx
 from app.config import settings
 from app.db import queries
 from app.db.models import ChatbotLog
+from app.diagnostics.trace import trace_event_async
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +37,7 @@ class RecStatus(str, Enum):
 @dataclass
 class RecResult:
     status: RecStatus
-    hotel_id: Optional[uuid.UUID] = None
+    hotel_ids: list[uuid.UUID] = field(default_factory=list)
 
 
 async def _resolve_not_found_sentinel(university_id: uuid.UUID) -> uuid.UUID:
@@ -60,17 +63,15 @@ async def run_rec_engine(
 
     Optional overrides are runtime-only — DB is not written before the run.
     """
-    # Idempotency: write processing row before any query work
     await queries.insert_rec_engine_processing(conversation_id, idempotency_key)
 
-    # Check if already processed (race: two retries both got here before either wrote)
     existing = await queries.get_rec_engine_log(idempotency_key)
     if existing and existing.status in ("success", "failed"):
         logger.info("RecEngine: idempotency key %s already resolved — skipping", idempotency_key)
         return
 
     try:
-        result = await _select_hotel(
+        result = await _select_hotels(
             conversation_id,
             university_id_override=university_id_override,
             gender_override=gender_override,
@@ -78,7 +79,7 @@ async def run_rec_engine(
     except Exception as exc:
         logger.error("RecEngine: unexpected error for conversation %s: %s", conversation_id, exc)
         await queries.update_rec_engine_log(idempotency_key, "failed", None, status_code="502")
-        await _fire_callback(conversation_id, None, RecStatus.FAILED)
+        await _fire_callback(conversation_id, None, RecStatus.FAILED, hotel_recs=None)
         await queries.write_log(ChatbotLog(
             conversation_id=conversation_id,
             operation_layer=LAYER,
@@ -90,13 +91,28 @@ async def run_rec_engine(
         ))
         return
 
-    hotel_rec = result.hotel_id if result.status != RecStatus.FAILED else None
+    hotel_rec: Optional[uuid.UUID] = None
+    hotel_recs: Optional[list[uuid.UUID]] = None
+    status_code = result.status.value
+
+    if result.status == RecStatus.FOUND:
+        hotel_recs = list(result.hotel_ids)
+        hotel_rec = hotel_recs[0] if hotel_recs else None
+    elif result.status == RecStatus.NOT_FOUND:
+        hotel_rec = result.hotel_ids[0] if result.hotel_ids else None
+
     db_status = "success" if result.status != RecStatus.FAILED else "failed"
-    await queries.update_rec_engine_log(idempotency_key, db_status, hotel_rec)
-    await _fire_callback(conversation_id, hotel_rec, result.status)
+    await queries.update_rec_engine_log(
+        idempotency_key,
+        db_status,
+        hotel_rec,
+        status_code=status_code,
+        hotel_recs=hotel_recs,
+    )
+    await _fire_callback(conversation_id, hotel_rec, result.status, hotel_recs=hotel_recs)
 
 
-async def _select_hotel(
+async def _select_hotels(
     conversation_id: uuid.UUID,
     university_id_override: uuid.UUID | None = None,
     gender_override: str | None = None,
@@ -107,9 +123,7 @@ async def _select_hotel(
     if not university_id or not gender:
         raise ValueError(f"Missing university_id or gender for conversation {conversation_id}")
 
-    candidates = await queries.find_hotels_by_gender_and_university(
-        gender, university_id
-    )
+    candidates = await queries.find_hotels_by_gender_and_university(gender, university_id)
 
     if not candidates:
         sentinel = await _resolve_not_found_sentinel(university_id)
@@ -117,54 +131,65 @@ async def _select_hotel(
             "RecEngine: conv=%s uni=%s gender=%s candidates=[] → NOT_FOUND sentinel=%s",
             conversation_id, university_id, gender, sentinel,
         )
-        return RecResult(status=RecStatus.NOT_FOUND, hotel_id=sentinel)
+        return RecResult(status=RecStatus.NOT_FOUND, hotel_ids=[sentinel])
 
-    if len(candidates) == 1:
-        hotel = candidates[0]
-    else:
-        hotel = max(candidates, key=lambda h: h.priority_score or 0)
+    live_ids: list[uuid.UUID] = []
+    for hotel in candidates:
+        if queries.is_recengine_sentinel_hotel_id(hotel.id):
+            continue
+        live = await queries.get_hotel_by_id(hotel.id)
+        if live:
+            live_ids.append(live.id)
+
+    if not live_ids:
+        sentinel = await _resolve_not_found_sentinel(university_id)
+        logger.warning(
+            "RecEngine: conv=%s all candidates stale or invalid → NOT_FOUND sentinel=%s",
+            conversation_id, sentinel,
+        )
+        return RecResult(status=RecStatus.NOT_FOUND, hotel_ids=[sentinel])
 
     logger.info(
-        "RecEngine: conv=%s uni=%s gender=%s candidates=%s → selected=%s",
+        "RecEngine: conv=%s uni=%s gender=%s candidates=%s → FOUND all=%s",
         conversation_id,
         university_id,
         gender,
         [(h.name, h.priority_score) for h in candidates],
-        hotel.name,
+        live_ids,
     )
+    await trace_event_async(
+        "recEngine",
+        "found",
+        conversation_id=conversation_id,
+        university_id=str(university_id),
+        gender=gender,
+        hotel_ids=[str(h) for h in live_ids],
+        candidate_count=len(candidates),
+    )
+    return RecResult(status=RecStatus.FOUND, hotel_ids=live_ids)
 
-    # Stale hotel reference check (§8.4)
-    live = await queries.get_hotel_by_id(hotel.id)
-    if not live:
-        logger.warning("RecEngine: hotel %s no longer exists — rerunning selection", hotel.id)
-        fresh_candidates = await queries.find_hotels_by_gender_and_university(
-            gender, university_id
-        )
-        fresh_candidates = [c for c in fresh_candidates if c.id != hotel.id]
-        if not fresh_candidates:
-            sentinel = await _resolve_not_found_sentinel(university_id)
-            return RecResult(status=RecStatus.NOT_FOUND, hotel_id=sentinel)
-        live = await queries.get_hotel_by_id(fresh_candidates[0].id)
-        if not live:
-            raise ValueError("Stale hotel rerun also produced a missing hotel — aborting")
-        hotel = fresh_candidates[0]
 
-    return RecResult(status=RecStatus.FOUND, hotel_id=hotel.id)
+# Backward-compatible alias for tests and callers.
+_select_hotel = _select_hotels
 
 
 async def _fire_callback(
     conversation_id: uuid.UUID,
     hotel_rec: Optional[uuid.UUID],
     status: RecStatus,
+    *,
+    hotel_recs: Optional[list[uuid.UUID]] = None,
 ) -> None:
     import os
     port = os.environ.get("PORT", "8000")
     url = f"http://localhost:{port}/internal/infogatherer/callback"
-    payload = {
+    payload: dict = {
         "conversation_id": str(conversation_id),
         "hotel_rec": str(hotel_rec) if hotel_rec else None,
         "status": status.value,
     }
+    if hotel_recs is not None:
+        payload["hotel_recs"] = [str(hid) for hid in hotel_recs]
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
             await client.post(

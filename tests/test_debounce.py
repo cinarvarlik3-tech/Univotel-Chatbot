@@ -29,6 +29,18 @@ def _clear_debounce_state():
     chatwoot._processing_locks.clear()
 
 
+@pytest.fixture(autouse=True)
+def _passthrough_first_sight_backfill():
+    """Most debounce tests use MagicMock conversations without history_backfilled_at."""
+    async def _allow(conv, _cwid):
+        return True, conv
+
+    with patch.object(
+        chatwoot, "_maybe_abstain_after_first_sight_backfill", side_effect=_allow
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # _enqueue_debounced_inbound
 # ---------------------------------------------------------------------------
@@ -50,6 +62,7 @@ async def test_should_process_immediately_when_debounce_disabled():
 
 @pytest.mark.asyncio
 async def test_should_coalesce_burst_messages_into_one_turn():
+    """Burst coalesce must complete via the production timer→flush path (not a foreign flush)."""
     base = _now()
 
     with patch.object(chatwoot.settings, "debounce_window_seconds", 3), \
@@ -58,7 +71,9 @@ async def test_should_coalesce_burst_messages_into_one_turn():
         await chatwoot._enqueue_debounced_inbound(100, "fiyat ne", 1, base, contact_phone="905551839644")
         await chatwoot._enqueue_debounced_inbound(100, "İTÜ", 2, base)
         await chatwoot._enqueue_debounced_inbound(100, "kız", 3, base)
-        await chatwoot._flush_debounce(100)
+        timer = chatwoot._debounce_buffers[100].task
+        assert timer is not None
+        await timer
 
     process.assert_awaited_once()
     kwargs = process.await_args.kwargs
@@ -66,6 +81,84 @@ async def test_should_coalesce_burst_messages_into_one_turn():
     assert kwargs["contact_phone"] == "905551839644"
     assert [f.content for f in kwargs["fragments"]] == ["fiyat ne", "İTÜ", "kız"]
     assert [f.chatwoot_message_id for f in kwargs["fragments"]] == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_should_complete_process_inbound_when_flush_runs_on_timer_task():
+    """
+    Production path: _timer → _flush_debounce → _pop_debounce_state must not
+    cancel the timer mid-flush (self-cancel regression).
+    """
+    with patch.object(chatwoot.settings, "debounce_window_seconds", 3), \
+         patch.object(chatwoot.asyncio, "sleep", new_callable=AsyncMock), \
+         patch.object(chatwoot, "_process_inbound", new_callable=AsyncMock) as process:
+        await chatwoot._enqueue_debounced_inbound(400, "merhaba", 1, _now())
+        timer = chatwoot._debounce_buffers[400].task
+        assert timer is not None
+        await timer
+
+    process.assert_awaited_once()
+    kwargs = process.await_args.kwargs
+    assert kwargs["chatwoot_conversation_id"] == 400
+    assert [f.content for f in kwargs["fragments"]] == ["merhaba"]
+    assert 400 not in chatwoot._debounce_buffers
+
+
+@pytest.mark.asyncio
+async def test_should_not_cancel_current_task_when_pop_during_flush():
+    """_pop_debounce_state must not cancel the task that is currently flushing."""
+    current = asyncio.current_task()
+    assert current is not None
+    state = chatwoot._DebounceState(chatwoot_conversation_id=401)
+    state.task = current
+    chatwoot._debounce_buffers[401] = state
+
+    popped = chatwoot._pop_debounce_state(401)
+
+    assert popped is state
+    assert 401 not in chatwoot._debounce_buffers
+    assert not current.cancelling()
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_should_cancel_prior_timer_when_new_fragment_arrives():
+    """A newer fragment must cancel the prior timer and coalesce both into one turn."""
+    base = _now()
+
+    with patch.object(chatwoot.settings, "debounce_window_seconds", 3), \
+         patch.object(chatwoot.asyncio, "sleep", new_callable=AsyncMock), \
+         patch.object(chatwoot, "_process_inbound", new_callable=AsyncMock) as process:
+        await chatwoot._enqueue_debounced_inbound(402, "a", 1, base)
+        task_a = chatwoot._debounce_buffers[402].task
+        assert task_a is not None
+
+        await chatwoot._enqueue_debounced_inbound(402, "b", 2, base)
+        # Capture the new timer before awaiting (awaiting would let flush clear the buffer).
+        task_b = chatwoot._debounce_buffers[402].task
+        assert task_b is not None
+        assert task_b is not task_a
+        assert task_a.cancelling() or task_a.cancelled() or task_a.done()
+
+        await task_b
+
+    process.assert_awaited_once()
+    assert [f.content for f in process.await_args.kwargs["fragments"]] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_should_persist_buffered_inbound_on_pending_debounce_flush_without_turn():
+    fake_conv = MagicMock()
+    fake_conv.id = uuid.uuid4()
+
+    with patch.object(chatwoot.queries, "upsert_conversation", new_callable=AsyncMock, return_value=fake_conv), \
+         patch.object(chatwoot.queries, "insert_message", new_callable=AsyncMock) as insert, \
+         patch.object(chatwoot.settings, "debounce_window_seconds", 3):
+        await chatwoot._enqueue_debounced_inbound(202, "merhaba", 9, _now())
+        await chatwoot._persist_pending_debounce(202)
+
+    insert.assert_awaited_once()
+    assert 202 not in chatwoot._debounce_buffers
 
 
 @pytest.mark.asyncio

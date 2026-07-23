@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # When true, suppress all lead-facing messages via send_with_retry (labels/attributes/private notes still write).
     outbound_block: bool = False
 
+    # Live trace dashboard (/diagnostics) — structured events + JSONL for live-test debugging.
+    live_trace_enabled: bool = False
+    live_trace_jsonl_path: Optional[str] = "logs/live_trace.jsonl"
+
     # LLM — provider keys (all stored; per-task provider selects which is used)
     gemini_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None

@@ -13,6 +13,7 @@ from typing import Optional
 
 from app.security import verify_internal_secret
 from app.db import queries
+from app.diagnostics.trace import trace_event_async
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,13 @@ async def start_rec_engine(
 ):
     verify_internal_secret(x_internal_secret)
 
-    # Check idempotency: if already processing/done, skip.
+    await trace_event_async(
+        "internal",
+        "recengine_start",
+        conversation_id=body.conversation_id,
+        idempotency_key=str(body.idempotency_key),
+    )
+
     existing = await queries.get_rec_engine_log(body.idempotency_key)
     if existing:
         logger.info(
@@ -64,7 +71,16 @@ async def start_rec_engine(
 class RecEngineCallbackRequest(BaseModel):
     conversation_id: uuid.UUID
     hotel_rec: Optional[uuid.UUID] = None
+    hotel_recs: Optional[list[uuid.UUID]] = None
     status: str  # "200_FOUND" | "200_NOT_FOUND" | "502"
+
+
+def _resolve_found_hotel_ids(body: RecEngineCallbackRequest) -> list[uuid.UUID]:
+    if body.hotel_recs:
+        return list(body.hotel_recs)
+    if body.hotel_rec is not None:
+        return [body.hotel_rec]
+    return []
 
 
 @router.post("/internal/infogatherer/callback")
@@ -75,6 +91,17 @@ async def rec_engine_callback(
     verify_internal_secret(x_internal_secret)
 
     conversation = await queries.get_conversation_by_id(body.conversation_id)
+    cwid = conversation.chatwoot_conversation_id if conversation else None
+    await trace_event_async(
+        "internal",
+        "recengine_callback",
+        conversation_id=body.conversation_id,
+        chatwoot_conversation_id=cwid,
+        status=body.status,
+        hotel_rec=str(body.hotel_rec) if body.hotel_rec else None,
+        hotel_recs_count=len(body.hotel_recs or []),
+    )
+
     if not conversation:
         logger.error("CALLBACK: conversation %s not found", body.conversation_id)
         return JSONResponse(status_code=200, content={"status": "not_found"})
@@ -88,13 +115,42 @@ async def rec_engine_callback(
 
     from app.db.queries import DEAL_AWAITING_LABEL_STATE_ID, GLOBAL_NULL_STATE_ID
     from app.layers.info_gatherer import (
+        _send_all_eligible_hotel_responses,
         _send_hotel_responses,
         _write_deal_awaiting_label,
     )
 
+    if body.status == "200_FOUND":
+        hotel_ids = _resolve_found_hotel_ids(body)
+        if not hotel_ids or any(queries.is_recengine_sentinel_hotel_id(hid) for hid in hotel_ids):
+            logger.error(
+                "CALLBACK: invalid FOUND payload for conversation %s hotel_ids=%s",
+                body.conversation_id, hotel_ids,
+            )
+            await queries.set_conversation_human_needed(body.conversation_id)
+            from app.layers.info_gatherer import _write_human_needed_label
+            await _write_human_needed_label(conversation.chatwoot_conversation_id)
+            return JSONResponse(status_code=200, content={"status": "invalid_found"})
+
+        advanced = await queries.update_conversation_state(
+            body.conversation_id, "completed", "recengine_running"
+        )
+        if not advanced:
+            logger.info("CALLBACK: lost optimistic lock on conversation %s — skipping", body.conversation_id)
+            return JSONResponse(status_code=200, content={"status": "lock_lost"})
+
+        chatwoot_id = conversation.chatwoot_conversation_id
+        await _send_all_eligible_hotel_responses(
+            body.conversation_id, chatwoot_id, hotel_ids, escalate_if_none_sent=True,
+        )
+
+        from app.tagassigner.attribute_resolver import write_attributes_at_flow_completion
+        await write_attributes_at_flow_completion(body.conversation_id, chatwoot_id)
+        return JSONResponse(status_code=200, content={"status": "ok"})
+
+    # NOT_FOUND (and legacy statuses): single sentinel path
     hotel_id = body.hotel_rec or GLOBAL_NULL_STATE_ID
 
-    # Advance state
     advanced = await queries.update_conversation_state(
         body.conversation_id, "completed", "recengine_running"
     )
@@ -108,8 +164,6 @@ async def rec_engine_callback(
     if hotel_id == DEAL_AWAITING_LABEL_STATE_ID:
         await _write_deal_awaiting_label(chatwoot_id)
 
-    # Write university / gender / ilgili_otel immediately so they are visible
-    # in Chatwoot without waiting for the next TagAssigner run.
     from app.tagassigner.attribute_resolver import write_attributes_at_flow_completion
     await write_attributes_at_flow_completion(body.conversation_id, chatwoot_id)
 

@@ -1,0 +1,75 @@
+{
+  "round_id": "2026-07-20-run2",
+  "flags": [
+    {
+      "cw_id": 924,
+      "kind": "identity_wrong",
+      "correct_value": "none",
+      "note": "berkan — only the widget starter names a university; nothing establishes the texter is the student. ogrenci wrongly applied."
+    },
+    {
+      "cw_id": 924,
+      "kind": "attr_wrong",
+      "target": "gender",
+      "correct_value": "Bilinmiyor",
+      "note": "berkan — lead never answered the gender question; 'Erkek' came from the bot's 'Academia Seyrantepe ... erkek öğrenci yurdumuzdur' pitch text, not the lead."
+    },
+    {
+      "cw_id": 559,
+      "kind": "attr_wrong",
+      "target": "university",
+      "correct_value": "Kent Üniversitesi - Taksim",
+      "note": "emaan — lead said 'Istanbul Kent University Beyoğlu' / 'Kent university istanbul'; written as MSGSÜ-Beşiktaş (wrong). The 'beyoğlu' token matched the MSGSÜ campus alias."
+    },
+    {
+      "cw_id": 1134,
+      "kind": "label_wrong_applied",
+      "target": "ilgilenmiyor",
+      "note": "Bülent Öztürk — engaged throughout (price, location, room, washing machine); no explicit disinterest. ilgilenmiyor wrongly applied."
+    },
+    {
+      "cw_id": 1154,
+      "kind": "attr_wrong",
+      "target": "university",
+      "correct_value": "İstanbul Üniversitesi",
+      "note": "İskender Aga — 'İstanbul üniversitesi Amerikan Dili edebiyatı bölümünde'; withheld (multi-campus, faculty didn't resolve to a campus)."
+    },
+    {
+      "cw_id": 1055,
+      "kind": "attr_wrong",
+      "target": "university",
+      "correct_value": "Boğaziçi - Ana Kampüs",
+      "note": "Nuray — 'Boğaziçi Üniversitesi' in the widget starter; withheld (multi-campus, no campus stated). Flagged as the main-campus default per developer."
+    },
+    {
+      "cw_id": 977,
+      "kind": "label_missing",
+      "target": "universitede",
+      "note": "A.Kaya — universitede present last run, absent this run; developer flags as tricky/marginal (veli with a daughter at Biruni)."
+    },
+    {
+      "cw_id": 707,
+      "kind": "label_wrong_applied",
+      "target": "veli",
+      "note": "Sıla — 'Kız öğrenci', '2.sınıfı bitirdim yaz stajı' = self-enrollment; veli wrongly applied."
+    },
+    {
+      "cw_id": 1359,
+      "kind": "label_wrong_applied",
+      "target": "hizmet-veremiyoruz",
+      "note": "İbrahim — İstanbul Aydın Üniversitesi is in İstanbul (not out-of-city); bot said '1-2 ay içerisinde ... lokasyon bulmaya çalışacağız'. hizmet-veremiyoruz wrong."
+    },
+    {
+      "cw_id": 1359,
+      "kind": "label_missing",
+      "target": "deal_awaiting",
+      "note": "İbrahim — 'we may have a location in 1-2 months' is the deal_awaiting case, not permanent can't-service."
+    }
+  ],
+  "converter_notes": [
+    "Farhan (1138): 'Bahcesehir university' NOT written — NOT a language-support failure. 'bahcesehir' matches the Bahçeşehir parent, which is multi-campus (Kuzey/Çırağan/Tıp) with no plain list value, and the lead stated no campus → bilinmiyor-kampus is a defensible withhold. Left unflagged (consistent with run 1's Farhan).",
+    "İbrahim (1359): developer noted ogrenci 'was not flagged', but ogrenci IS present in the current Chatwoot labels (hizmet-veremiyoruz, ogrenci, universitede) — not an error, so not flagged.",
+    "emaan (559): missing ogrenci not flagged — developer attributes it to English-language support and asked to exclude it.",
+    "A.Kaya (977): university is now correctly written (Biruni Üniversitesi) — an improvement over run 1 where it was withheld."
+  ]
+}

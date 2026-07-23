@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.db.models import Conversation, Message
+from app.tagassigner.context_backfill import BackfillResult
 
 
 def _conv() -> Conversation:
@@ -31,7 +32,7 @@ async def test_should_backfill_before_transcript_read_on_full_history_trigger():
     with patch("app.tagassigner.router.queries.get_tagassigner_run", new_callable=AsyncMock, return_value=None), \
          patch("app.tagassigner.router.queries.get_conversation_by_id", new_callable=AsyncMock, return_value=conv), \
          patch("app.tagassigner.router.get_labels", new_callable=AsyncMock, return_value=[]), \
-         patch("app.tagassigner.router.backfill_conversation_messages", new_callable=AsyncMock, return_value=5) as backfill_mock, \
+         patch("app.tagassigner.router.backfill_conversation_messages", new_callable=AsyncMock, return_value=BackfillResult(ok=True, inserted=5)) as backfill_mock, \
          patch("app.tagassigner.router.queries.get_messages_for_conversation", new_callable=AsyncMock, return_value=messages) as get_msgs_mock, \
          patch("app.tagassigner.router.load_formatted_university_list_lines", new_callable=AsyncMock, return_value=[]), \
          patch("app.tagassigner.router.build_payload", return_value={"system_prompt": "p", "user_content": "u"}), \

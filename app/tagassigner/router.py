@@ -55,6 +55,10 @@ logger = logging.getLogger(__name__)
 
 _WRITEBACK_DELAYS = [1.0, 2.0, 4.0]
 
+# Operational marker label — stamped on every conversation TagAssigner writes to,
+# so runs can be filtered in Chatwoot (never part of the LLM taxonomy/mutex logic).
+AI_PROCESSED_LABEL = "ai"
+
 
 def _is_taggable_in_testing_mode(conv: Conversation) -> bool:
     if not settings.testing_limitations_mode:
@@ -107,12 +111,12 @@ async def run_tagging(
     current_labels_clean = remove_tag_trigger_label(current_labels)
 
     if read_full_history:
-        inserted = await backfill_conversation_messages(
+        backfill = await backfill_conversation_messages(
             conversation_id, conv.chatwoot_conversation_id
         )
         logger.info(
             "TagAssigner router: context backfill conversation=%s inserted=%d",
-            conversation_id, inserted,
+            conversation_id, backfill.inserted,
         )
         messages = await queries.get_messages_for_conversation(conversation_id)
         logger.info(
@@ -336,6 +340,10 @@ async def apply_tagassigner_result(
     final_labels = await apply_deal_awaiting(
         conv.university_id, conv.gender, labels_with_hizmet
     )
+    # Operational marker: stamp every conversation TagAssigner ever writes to so it can
+    # be filtered in Chatwoot. Added last, after all label-resolution machinery, so it
+    # is never subject to resolve_labels' mutex/removal logic and is never lost.
+    final_labels = sorted(set(final_labels) | {AI_PROCESSED_LABEL})
     if set(final_labels) != set(current_labels):
         success = await _write_labels_with_retry(
             conversation_id, run_id, conv.chatwoot_conversation_id, final_labels
