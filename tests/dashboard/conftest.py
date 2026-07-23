@@ -84,6 +84,9 @@ class FakePool:
 def fake_pool(monkeypatch: pytest.MonkeyPatch) -> FakePool:
     pool = FakePool()
     monkeypatch.setattr("dashboard.api.queries.get_pool", lambda: pool)
+    # notes.py imports get_pool into its own namespace (the dashboard's only
+    # write path); patch it too so note lookups hit the fake pool.
+    monkeypatch.setattr("dashboard.api.notes.get_pool", lambda: pool)
     return pool
 
 

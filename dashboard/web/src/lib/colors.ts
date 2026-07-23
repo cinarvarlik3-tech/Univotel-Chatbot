@@ -105,6 +105,21 @@ export function rankLabelColor(index: number, key?: string): string {
   return index <= 2 ? '#0A0C10' : '#FFFFFF';
 }
 
+/**
+ * Notes are yellow everywhere (DASHBOARD_SPEC.md notes addition). Reuses the
+ * Chatwoot private-note palette the transcript already validates — conversation
+ * notes are meant to read "like the private notes in chatwoot" — with a brighter
+ * amber rail/heading so a NOTE is distinct from a genuine private note.
+ */
+export const NOTE_STYLE = {
+  rail: '#EAB308',
+  heading: '#EAB308',
+  bg: '#2B2718',
+  text: '#F5E9C8',
+  tint: 'rgba(234,179,8,0.10)',
+  dot: '#EAB308',
+} as const;
+
 export const BUBBLE_STYLES = {
   inbound: { bg: '#2B3137', text: '#FFFFFF', align: 'left' as const, name: 'Lead' },
   bot: { bg: '#1B5FA8', text: '#FFFFFF', align: 'right' as const, name: 'ChatBot' },

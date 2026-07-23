@@ -7,9 +7,10 @@
  * persist clock is comparable with chatbot_logs.created_at.
  */
 import { useEffect, useMemo, useRef } from 'react';
-import type { ConversationMessages, FlowMarker, MessageRow } from '../api/types';
+import type { ConversationMessages, FlowMarker, MessageRow, Note } from '../api/types';
 import { BUBBLE_STYLES, MARKER_STATUS, STATUS_STYLES } from '../lib/colors';
 import { formatTime, formatUtcTitle } from '../lib/format';
+import { NoteBubble } from './Notes';
 import { EmptyState, ErrorState, SkeletonBlock } from './States';
 
 function Bubble({
@@ -121,12 +122,18 @@ export default function Transcript({
   error,
   hidePrivate,
   onOpenMessage,
+  notes = [],
+  notePending = false,
+  onToggleNoteResolved,
 }: {
   data: ConversationMessages | undefined;
   isLoading: boolean;
   error: unknown;
   hidePrivate: boolean;
   onOpenMessage: (messageId: string, trigger: HTMLElement) => void;
+  notes?: Note[];
+  notePending?: boolean;
+  onToggleNoteResolved?: (note: Note) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -134,6 +141,45 @@ export default function Transcript({
     () => (data ? data.messages.filter((m) => !hidePrivate || !m.is_private) : []),
     [data, hidePrivate],
   );
+
+  // Notes are anchored beneath the last message persisted at or before the note,
+  // the same persist-clock rule the server uses for markers. New notes carry the
+  // latest timestamp and so land at the bottom, where a chat expects them.
+  const { notesByMessage, leadingNotes } = useMemo(() => {
+    const byMessage = new Map<string, Note[]>();
+    const leading: Note[] = [];
+    const ordered = messages
+      .filter((m) => m.created_at)
+      .slice()
+      .sort((a, b) => (a.created_at as string).localeCompare(b.created_at as string));
+    for (const note of notes) {
+      const at = note.created_at ?? '';
+      let anchorId: string | null = null;
+      for (const message of ordered) {
+        if ((message.created_at as string) <= at) anchorId = message.id;
+        else break;
+      }
+      if (anchorId) {
+        const list = byMessage.get(anchorId) ?? [];
+        list.push(note);
+        byMessage.set(anchorId, list);
+      } else {
+        leading.push(note);
+      }
+    }
+    return { notesByMessage: byMessage, leadingNotes: leading };
+  }, [messages, notes]);
+
+  function renderNote(note: Note) {
+    return (
+      <NoteBubble
+        key={note.id}
+        note={note}
+        pending={notePending}
+        onToggleResolved={(n) => onToggleNoteResolved?.(n)}
+      />
+    );
+  }
 
   // Markers grouped by the message they render beneath. Anything anchored to a
   // hidden or missing message falls back to the top so it is never dropped.
@@ -170,7 +216,7 @@ export default function Transcript({
       cancelAnimationFrame(outer);
       cancelAnimationFrame(inner);
     };
-  }, [data?.conversation.chatwoot_conversation_id, messages.length]);
+  }, [data?.conversation.chatwoot_conversation_id, messages.length, notes.length]);
 
   if (error) return <ErrorState error={error} />;
   if (isLoading || !data) {
@@ -183,7 +229,7 @@ export default function Transcript({
     );
   }
 
-  if (messages.length === 0) {
+  if (messages.length === 0 && leadingNotes.length === 0) {
     return (
       <div className="bg-transcript">
         <EmptyState
@@ -204,6 +250,7 @@ export default function Transcript({
         {leadingMarkers.map((marker, index) => (
           <Marker key={`leading-${index}`} marker={marker} />
         ))}
+        {leadingNotes.map(renderNote)}
 
         {messages.map((message, index) => {
           const previous = messages[index - 1];
@@ -223,6 +270,7 @@ export default function Transcript({
                 {(markersByMessage.get(message.id) ?? []).map((marker, markerIndex) => (
                   <Marker key={`${message.id}-${markerIndex}`} marker={marker} />
                 ))}
+                {(notesByMessage.get(message.id) ?? []).map(renderNote)}
               </ul>
             </li>
           );

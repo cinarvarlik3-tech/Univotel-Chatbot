@@ -5,7 +5,12 @@
  * there is nothing here to leak. A 401 means the browser will re-challenge on the
  * next navigation; a 503 means the server has no credentials configured.
  */
-import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseQueryOptions,
+} from '@tanstack/react-query';
 import type {
   Breakdowns,
   ConversationDetail,
@@ -17,6 +22,9 @@ import type {
   LogFilters,
   LogList,
   Meta,
+  Note,
+  NoteList,
+  NoteType,
   StatsSummary,
   TriggerList,
 } from './types';
@@ -93,6 +101,32 @@ async function get<T>(path: string, params: QueryParams = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function send<T>(
+  method: 'POST' | 'PATCH',
+  path: string,
+  body: unknown,
+): Promise<T> {
+  const response = await fetch(url(path, {}), {
+    method,
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const errorBody = await response.json();
+      if (typeof errorBody?.detail === 'string') detail = errorBody.detail;
+    } catch {
+      // Non-JSON error body — keep the status text.
+    }
+    throw new ApiError(response.status, detail);
+  }
+
+  return response.json() as Promise<T>;
+}
+
 export const api = {
   meta: () => get<Meta>('/meta'),
   conversations: (filters: ConversationFilters) =>
@@ -110,6 +144,17 @@ export const api = {
   breakdowns: () => get<Breakdowns>('/infogatherer/stats/breakdowns'),
   triggers: (limit = 20) =>
     get<TriggerList>('/infogatherer/stats/human-needed-triggers', { limit }),
+  conversationNotes: (cwid: number, type?: NoteType) =>
+    get<NoteList>(`/infogatherer/conversations/${cwid}/notes`, type ? { type } : {}),
+  createNote: (cwid: number, noteType: NoteType, body: string) =>
+    send<Note>('POST', `/infogatherer/conversations/${cwid}/notes`, {
+      note_type: noteType,
+      body,
+    }),
+  setNoteResolved: (noteId: string, resolved: boolean) =>
+    send<Note>('PATCH', `/infogatherer/notes/${encodeURIComponent(noteId)}`, {
+      resolved,
+    }),
 };
 
 // Lists and stats poll; detail views do not — a panel must not mutate under the
@@ -187,4 +232,45 @@ export function useTriggers(limit = 20) {
     queryFn: () => api.triggers(limit),
     ...LIST_OPTIONS,
   });
+}
+
+// Notes are collaborative: poll like a list so a second reviewer's note shows up,
+// and invalidate on every mutation so the author sees their own change at once.
+export function useConversationNotes(cwid: number | null, type?: NoteType) {
+  return useQuery({
+    queryKey: ['conversationNotes', cwid, type ?? 'all'],
+    queryFn: () => api.conversationNotes(cwid as number, type),
+    enabled: cwid !== null,
+    ...LIST_OPTIONS,
+  });
+}
+
+/**
+ * Create + resolve mutations for one conversation's notes.
+ *
+ * Both invalidate the notes list (so the panel updates) and the conversations
+ * list (so the yellow dot appears or clears). The conversation key is invalidated
+ * broadly because it is filtered/paged into many cache entries.
+ */
+export function useNoteMutations(cwid: number) {
+  const queryClient = useQueryClient();
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['conversationNotes', cwid] });
+    queryClient.invalidateQueries({ queryKey: ['conversations'] });
+  };
+
+  const create = useMutation({
+    mutationFn: ({ noteType, body }: { noteType: NoteType; body: string }) =>
+      api.createNote(cwid, noteType, body),
+    onSuccess: invalidate,
+  });
+
+  const setResolved = useMutation({
+    mutationFn: ({ noteId, resolved }: { noteId: string; resolved: boolean }) =>
+      api.setNoteResolved(noteId, resolved),
+    onSuccess: invalidate,
+  });
+
+  return { create, setResolved };
 }

@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 ReasonSource = Literal["log", "rec_engine", "inferred", "stale", "unknown"]
 BubbleKind = Literal["inbound", "bot", "human", "private"]
 MarkerKind = Literal["failure", "human_needed", "human_interruption"]
+NoteType = Literal["log", "conversation"]
 
 
 class Meta(BaseModel):
@@ -33,6 +34,7 @@ class ConversationRow(BaseModel):
     failure_signature: Optional[str] = None
     message_count: int
     log_count: int
+    has_unresolved_note: bool = False
     created_at: Optional[str] = None
     last_activity_at: Optional[str] = None
     takeover_at: Optional[str] = None
@@ -69,6 +71,41 @@ class ConversationRef(BaseModel):
     lead_name: str
     status: str
     flow_state: str
+
+
+class Note(BaseModel):
+    id: str
+    conversation_id: str
+    chatwoot_conversation_id: int
+    note_type: NoteType
+    body: str
+    resolved: bool = False
+    author: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    resolved_at: Optional[str] = None
+
+
+class NoteList(BaseModel):
+    conversation: ConversationRef
+    rows: list[Note]
+
+
+class NoteCreate(BaseModel):
+    note_type: NoteType
+    body: str = Field(min_length=1, max_length=5000)
+
+    @field_validator("body")
+    @classmethod
+    def body_not_blank(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Note body cannot be blank")
+        return cleaned
+
+
+class NoteUpdate(BaseModel):
+    resolved: bool
 
 
 class LogRow(BaseModel):

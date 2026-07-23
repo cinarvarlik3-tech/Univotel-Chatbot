@@ -10,9 +10,9 @@ import logging
 from datetime import datetime, time, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
-from dashboard.api import derive, queries, schemas
+from dashboard.api import derive, notes, queries, schemas
 from dashboard.api.auth import require_dashboard_auth
 from dashboard.api.config import get_dashboard_settings
 from dashboard.api.sql import SORT_COLUMNS
@@ -157,6 +157,78 @@ async def get_conversation_messages(cwid: int) -> schemas.ConversationMessages:
     if result is None:
         raise HTTPException(status_code=404, detail=f"No conversation #{cwid}")
     return schemas.ConversationMessages(**result)
+
+
+# ---------------------------------------------------------------------------
+# Notes (per-lead annotations — the dashboard's only write path)
+# ---------------------------------------------------------------------------
+
+
+def _conversation_ref_from_row(row: dict) -> schemas.ConversationRef:
+    return schemas.ConversationRef(
+        id=row["id"],
+        chatwoot_conversation_id=row["chatwoot_conversation_id"],
+        lead_name=row["lead_name"],
+        status=row["status"],
+        flow_state=row["flow_state"],
+    )
+
+
+@router.get(
+    "/infogatherer/conversations/{cwid}/notes", response_model=schemas.NoteList
+)
+async def get_conversation_notes(
+    cwid: int,
+    note_type: Optional[str] = Query(default=None, alias="type"),
+) -> schemas.NoteList:
+    if note_type is not None and note_type not in notes.NOTE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid note type: {note_type}. Allowed: {', '.join(notes.NOTE_TYPES)}",
+        )
+    conversation = await queries.get_conversation(stale_hours=_stale_hours(), cwid=cwid)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail=f"No conversation #{cwid}")
+    rows = await notes.list_notes(
+        conversation_uuid=conversation["id"], note_type=note_type
+    )
+    return schemas.NoteList(
+        conversation=_conversation_ref_from_row(conversation),
+        rows=[schemas.Note(**row) for row in rows],
+    )
+
+
+@router.post(
+    "/infogatherer/conversations/{cwid}/notes",
+    response_model=schemas.Note,
+    status_code=201,
+)
+async def create_conversation_note(
+    cwid: int,
+    payload: schemas.NoteCreate = Body(...),
+    author: str = Depends(require_dashboard_auth),
+) -> schemas.Note:
+    conversation_uuid = await notes.resolve_conversation_uuid(cwid)
+    if conversation_uuid is None:
+        raise HTTPException(status_code=404, detail=f"No conversation #{cwid}")
+    row = await notes.create_note(
+        conversation_uuid=conversation_uuid,
+        note_type=payload.note_type,
+        body=payload.body,
+        author=author,
+    )
+    return schemas.Note(**row)
+
+
+@router.patch("/infogatherer/notes/{note_id}", response_model=schemas.Note)
+async def update_note(
+    note_id: str,
+    payload: schemas.NoteUpdate = Body(...),
+) -> schemas.Note:
+    row = await notes.set_note_resolved(note_id=note_id, resolved=payload.resolved)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No note {note_id}")
+    return schemas.Note(**row)
 
 
 # ---------------------------------------------------------------------------

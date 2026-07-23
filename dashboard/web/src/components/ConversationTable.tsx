@@ -6,7 +6,7 @@
  * flow state plus a coloured left rail — never colour alone.
  */
 import type { ConversationRow, Status } from '../api/types';
-import { STATUS_STYLES } from '../lib/colors';
+import { NOTE_STYLE, STATUS_STYLES } from '../lib/colors';
 import { EM_DASH, formatRelative, truncate } from '../lib/format';
 import { StatusChip } from './StatusChip';
 import { EmptyState, Pagination, SkeletonRows } from './States';
@@ -154,8 +154,19 @@ export default function ConversationTable({
                     </td>
 
                     <td className="td tabular whitespace-nowrap">
-                      <span className="font-mono text-ink2">
-                        #{row.chatwoot_conversation_id}
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="font-mono text-ink2">
+                          #{row.chatwoot_conversation_id}
+                        </span>
+                        {row.has_unresolved_note && (
+                          <span
+                            className="inline-block h-2 w-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: NOTE_STYLE.dot }}
+                            title="This conversation has an unresolved note"
+                            aria-label="Has an unresolved note"
+                            role="img"
+                          />
+                        )}
                       </span>
                       <div className="mt-0.5 text-[11px] text-ink3">
                         {row.message_count} msg · {row.log_count} logs ·{' '}

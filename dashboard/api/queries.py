@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.db.client import get_pool
-from dashboard.api import derive, sql
+from dashboard.api import derive, notes, sql
 
 # ---------------------------------------------------------------------------
 # Row assembly
@@ -58,6 +58,10 @@ def _conversation_row(record: Any, stale_hours: int) -> dict[str, Any]:
         "failure_signature": signature,
         "message_count": record["message_count"],
         "log_count": record["log_count"],
+        # Set by the caller from a single batched lookup (notes table); defaults
+        # false so a conversation with no notes — or a DB without migration 033 —
+        # simply carries no dot.
+        "has_unresolved_note": False,
         "created_at": derive.to_iso(record["created_at"]),
         "last_activity_at": derive.to_iso(record["last_activity_at"]),
         "takeover_at": derive.to_iso(record["takeover_at"]),
@@ -232,11 +236,16 @@ async def list_conversations(
     records = await pool.fetch(query, stale_hours, *filter_params, limit, offset)
     total = records[0]["total_count"] if records else 0
 
+    rows = [_conversation_row(r, stale_hours) for r in records]
+    flagged = await notes.unresolved_conversation_ids([row["id"] for row in rows])
+    for row in rows:
+        row["has_unresolved_note"] = row["id"] in flagged
+
     return {
         "total": total,
         "limit": limit,
         "offset": offset,
-        "rows": [_conversation_row(r, stale_hours) for r in records],
+        "rows": rows,
     }
 
 
@@ -249,6 +258,8 @@ async def get_conversation(
         return None
 
     row = _conversation_row(record, stale_hours)
+    flagged = await notes.unresolved_conversation_ids([row["id"]])
+    row["has_unresolved_note"] = row["id"] in flagged
     row.update(
         {
             "university_id": str(record["university_id"]) if record["university_id"] else None,

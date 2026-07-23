@@ -10,14 +10,10 @@ import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import LeftNav from './components/LeftNav';
 import RightPanel from './components/RightPanel';
 import LogDetail from './components/LogDetail';
-import Transcript, { MessageDetail } from './components/Transcript';
-import { LogRowList } from './components/LogTable';
-import { ErrorState } from './components/States';
-import {
-  useConversationLogs,
-  useConversationMessages,
-  useLogDetail,
-} from './api/client';
+import { MessageDetail } from './components/Transcript';
+import ConversationChat from './components/ConversationChat';
+import ConversationLogsPanel from './components/ConversationLogsPanel';
+import { useConversationMessages, useLogDetail } from './api/client';
 import { panelTitle, usePanel, type PanelState } from './state/panel';
 import Conversations from './pages/Conversations';
 import InfoGathererOverview from './pages/InfoGathererOverview';
@@ -55,31 +51,21 @@ function PanelBody({
   onOpenLogDetail: (logId: string, trigger: HTMLElement) => void;
   onOpenMessage: (messageId: string, trigger: HTMLElement) => void;
 }) {
-  const logsQuery = useConversationLogs(
-    panel.kind === 'conversationLogs' ? panel.cwid : null,
-  );
+  // messageDetail reads from the transcript query; the two conversation panels
+  // own their own data fetching (logs/messages + notes) inside their components.
   const messagesQuery = useConversationMessages(
-    panel.kind === 'conversationChat' || panel.kind === 'messageDetail' ? panel.cwid : null,
+    panel.kind === 'messageDetail' ? panel.cwid : null,
   );
   const detailQuery = useLogDetail(panel.kind === 'logDetail' ? panel.logId : null);
 
   switch (panel.kind) {
     case 'conversationLogs':
-      if (logsQuery.error) return <ErrorState error={logsQuery.error} />;
-      return (
-        <LogRowList
-          rows={logsQuery.data?.rows ?? []}
-          isLoading={logsQuery.isLoading}
-          onOpenDetail={onOpenLogDetail}
-        />
-      );
+      return <ConversationLogsPanel cwid={panel.cwid} onOpenDetail={onOpenLogDetail} />;
 
     case 'conversationChat':
       return (
-        <Transcript
-          data={messagesQuery.data}
-          isLoading={messagesQuery.isLoading}
-          error={messagesQuery.error}
+        <ConversationChat
+          cwid={panel.cwid}
           hidePrivate={hidePrivate}
           onOpenMessage={onOpenMessage}
         />

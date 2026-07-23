@@ -11,6 +11,54 @@ import { EM_DASH, formatDateTime, formatStateTransition, formatUtcTitle, truncat
 import { DerivedChip, StatusChip } from './StatusChip';
 import { EmptyState, Pagination, SkeletonRows } from './States';
 
+/** One compact log row — shared by the panel list and the notes-interleaved timeline. */
+export function LogEntryItem({
+  row,
+  onOpenDetail,
+}: {
+  row: LogRow;
+  onOpenDetail: (logId: string, trigger: HTMLElement) => void;
+}) {
+  const style = STATUS_STYLES[row.log_status];
+  return (
+    <li
+      className="px-3 py-2.5"
+      style={{ backgroundColor: style.tint, boxShadow: `inset 3px 0 0 ${style.color}` }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span
+              className="tabular text-[11px] text-ink3"
+              title={formatUtcTitle(row.created_at)}
+            >
+              {formatDateTime(row.created_at)}
+            </span>
+            <StatusChip status={row.log_status} variant="log" compact />
+            {row.derived && <DerivedChip />}
+          </div>
+          <div className="mt-1 truncate font-mono text-[12px] text-ink2" title={row.operation_label}>
+            {row.operation_label}
+          </div>
+          {row.explanation && (
+            <p className="mt-1 text-[12px] text-ink2" dir="auto">
+              {truncate(row.explanation, 140)}
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          className="btn shrink-0"
+          onClick={(event) => onOpenDetail(row.id, event.currentTarget)}
+          aria-label={`Details for log at ${formatDateTime(row.created_at)}`}
+        >
+          Details
+        </button>
+      </div>
+    </li>
+  );
+}
+
 /** Compact list used inside the conversation-logs panel. */
 export function LogRowList({
   rows,
@@ -42,47 +90,9 @@ export function LogRowList({
 
   return (
     <ul className="divide-y divide-border/60">
-      {rows.map((row) => {
-        const style = STATUS_STYLES[row.log_status];
-        return (
-          <li
-            key={row.id}
-            className="px-3 py-2.5"
-            style={{ backgroundColor: style.tint, boxShadow: `inset 3px 0 0 ${style.color}` }}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span
-                    className="tabular text-[11px] text-ink3"
-                    title={formatUtcTitle(row.created_at)}
-                  >
-                    {formatDateTime(row.created_at)}
-                  </span>
-                  <StatusChip status={row.log_status} variant="log" compact />
-                  {row.derived && <DerivedChip />}
-                </div>
-                <div className="mt-1 truncate font-mono text-[12px] text-ink2" title={row.operation_label}>
-                  {row.operation_label}
-                </div>
-                {row.explanation && (
-                  <p className="mt-1 text-[12px] text-ink2" dir="auto">
-                    {truncate(row.explanation, 140)}
-                  </p>
-                )}
-              </div>
-              <button
-                type="button"
-                className="btn shrink-0"
-                onClick={(event) => onOpenDetail(row.id, event.currentTarget)}
-                aria-label={`Details for log at ${formatDateTime(row.created_at)}`}
-              >
-                Details
-              </button>
-            </div>
-          </li>
-        );
-      })}
+      {rows.map((row) => (
+        <LogEntryItem key={row.id} row={row} onOpenDetail={onOpenDetail} />
+      ))}
     </ul>
   );
 }

@@ -11,6 +11,7 @@ export type Status =
 export type ReasonSource = 'log' | 'rec_engine' | 'inferred' | 'stale' | 'unknown';
 export type BubbleKind = 'inbound' | 'bot' | 'human' | 'private';
 export type MarkerKind = 'failure' | 'human_needed' | 'human_interruption';
+export type NoteType = 'log' | 'conversation';
 
 export interface Meta {
   stale_hours: number;
@@ -35,6 +36,7 @@ export interface ConversationRow {
   failure_signature: string | null;
   message_count: number;
   log_count: number;
+  has_unresolved_note: boolean;
   created_at: string | null;
   last_activity_at: string | null;
   takeover_at: string | null;
@@ -207,6 +209,24 @@ export interface TriggerList {
   total_human_needed: number;
   with_trigger: number;
   rows: TriggerRow[];
+}
+
+export interface Note {
+  id: string;
+  conversation_id: string;
+  chatwoot_conversation_id: number;
+  note_type: NoteType;
+  body: string;
+  resolved: boolean;
+  author: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  resolved_at: string | null;
+}
+
+export interface NoteList {
+  conversation: ConversationRef;
+  rows: Note[];
 }
 
 export interface ConversationFilters {
